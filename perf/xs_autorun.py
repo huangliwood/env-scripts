@@ -21,11 +21,11 @@ from gcpt import GCPT
 import AutoEmailAlert
 
 tasks_dir = "SPEC06_EmuTasks_10_22_2021"
-
-def get_perf_base_path(xs_path):
+maxThreads = 32
+def get_perf_base_path():
   if os.path.isabs(tasks_dir):
     return tasks_dir
-  return os.path.join(xs_path, tasks_dir)
+  return os.path.join(os.path.dirname("."), tasks_dir)
 
 def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None, sorted_by=None):
   perf_filter = [
@@ -37,7 +37,7 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
   with open(json_path) as f:
     data = json.load(f)
   hour_list=[]
-  perf_base_path = get_perf_base_path(xs_path)
+  perf_base_path = get_perf_base_path()
   for benchspec in data:
     for point in data[benchspec]:
       weight = data[benchspec][point]
@@ -61,12 +61,12 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
       if perf_match and state_match:
         hour_list.append(hour)
         all_gcpt.append(gcpt)
-  print(f"evaluate execute hours: {cal_exe_hours(hour_list, 128 // threads)}")
+  print(f"evaluate execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
 
   if sorted_by is not None:
     all_gcpt = sorted(all_gcpt, key=sorted_by)
     hour_list = [g.eval_run_hours for g in all_gcpt]
-    print(f"opitimize execute hours: {cal_exe_hours(hour_list, 128 // threads)}")
+    print(f"opitimize execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
   
   dump_json = True
   dump_json = False
@@ -80,13 +80,12 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
       json.dump(json_dict, f)
   return all_gcpt
 
-def xs_run(workloads, xs_path, warmup, max_instr, threads, cmdline_opt):
-  emu_path = os.path.join(xs_path, "build/emu")
+def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt):
   nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-nemu-interpreter-so")
   #nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-spike-so")
   base_arguments = []
   if cmdline_opt == "nanhu":
-    base_arguments = [emu_path, '--diff', nemu_so_path, '--dump-tl', '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
+    base_arguments = [emu_path, '--diff', nemu_so_path, '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
   elif cmdline_opt == "kunminghu":
     base_arguments = [emu_path, '--diff', nemu_so_path, '--dump-db', '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
   elif cmdline_opt == "nutshell":
@@ -95,7 +94,7 @@ def xs_run(workloads, xs_path, warmup, max_instr, threads, cmdline_opt):
     sys.exit("unsupported xs emu command line options, use nanhu or kunminghu")
   # base_arguments = [emu_path, '-W', str(warmup), '-I', str(max_instr), '-i']
   proc_count, finish_count = 0, 0
-  max_pending_proc = 128 // threads
+  max_pending_proc = maxThreads // threads
   pending_proc, error_proc = [], []
   free_cores = list(range(max_pending_proc))
   # skip CI cores
@@ -131,7 +130,7 @@ def xs_run(workloads, xs_path, warmup, max_instr, threads, cmdline_opt):
             start_core = threads * allocate_core
             end_core = threads * allocate_core + threads - 1
             numa_node = 1 if start_core >= 64 else 0
-            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+128}-{end_core+128}"]
+            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+maxThreads}-{end_core+maxThreads}"]
             numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core}-{end_core}"]
           workload_path = workload.get_bin_path()
           result_path = workload.get_res_dir()
@@ -194,7 +193,7 @@ def get_all_manip():
     return all_manip
 
 def get_total_inst(benchspec, spec_version, isa):
-  base_dir = "/nfs-nvme/home/share/checkpoints_profiles"
+  base_dir = "~/xs-simpoints"
   if spec_version == 2006:
     if isa == "rv64gc_old":
       base_path = os.path.join(base_dir, "spec06_rv64gc_o2_50m/profiling")
@@ -301,7 +300,7 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
   keys = list(map(lambda gcpt: gcpt.benchspec, all_gcpt))
   for k in keys:
     gcpt_top_down[k.split("_")[0]] = dict()
-  graph_num = top_down_report.xs_report_top_down_tf(get_perf_base_path(xs_path), all_gcpt, gcpt_top_down)
+  graph_num = top_down_report.xs_report_top_down_tf(get_perf_base_path(), all_gcpt, gcpt_top_down)
   plt.figure(figsize=(25,45))
   for i in range(graph_num):
     plt.subplot((graph_num + 1) // 2, 2, i + 1)
@@ -327,7 +326,7 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
     plt.xticks(rotation=90)
     plt.legend()
     plt.title(topname)
-  plt.savefig(f'{get_perf_base_path(xs_path)}_topdown.svg', bbox_inches='tight')
+  plt.savefig(f'{get_perf_base_path()}_topdown.svg', bbox_inches='tight')
   # for benchspec,top in gcpt_top_down.items():
   #   bottom = [0.0]
   #   for key,value in top.down.items():
@@ -335,15 +334,17 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
   #     plt.bar([benchspec], percentage, bottom=bottom, label=key)
   #     bottom = list(map(lambda x,y: x + y, bottom, percentage))
   # plt.legend()
-  # plt.savefig(f'{get_perf_base_path(xs_path)}_topdown/{top.name}.png')
+  # plt.savefig(f'{get_perf_base_path()}_topdown/{top.name}.png')
   # plt.clf()
   #print(f"Number of Checkpoints: {len(all_gcpt)}")
   #print(f"SPEC CPU Version: SPEC CPU{spec_version}, {isa}")
 
 
 def xs_show(all_gcpt):
+  i=0
   for gcpt in all_gcpt:
-    gcpt.show()
+    gcpt.show(i)
+    i+=1
 
 def xs_debug(all_gcpt):
   for gcpt in all_gcpt:
@@ -352,14 +353,15 @@ def xs_debug(all_gcpt):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="autorun script for xs")
   parser.add_argument('gcpt_path', metavar='gcpt_path', type=str,
-                      help='path to gcpt checkpoints')
+                      help='path to gcpt checkpoints',default="~/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt")
   parser.add_argument('json_path', metavar='json_path', type=str,
-                      help='path to gcpt json')
+                      help='path to gcpt json',default="~/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_coverage0.3_test.json")
   parser.add_argument('--xs', help='path to xs')
+  parser.add_argument('--emu', help='path to emu',default=f"./build/emu")
   parser.add_argument('--cmdline-opt', default="nanhu", type=str, help='xs emu command line options, nanhu or kunminghu')
   parser.add_argument('--ref', default=None, type=str, help='path to ref')
-  parser.add_argument('--warmup', '-W', default=20000000, type=int, help="warmup instr count")
-  parser.add_argument('--max-instr', '-I', default=40000000, type=int, help="max instr count")
+  parser.add_argument('--warmup', '-W', default=5000000, type=int, help="warmup instr count")
+  parser.add_argument('--max-instr', '-I', default=20000000, type=int, help="max instr count")
   parser.add_argument('--threads', '-T', default=1, type=int, help="number of emu threads")
   parser.add_argument('--report', '-R', action='store_true', default=False, help='report only')
   parser.add_argument('--report-top-down', action='store_true', default=False, help='report top-down only')
@@ -373,7 +375,6 @@ if __name__ == "__main__":
   parser.add_argument('--resume', action='store_true', default=False, help="continue to exe, ignore the aborted and success tests")
 
   args = parser.parse_args()
-
   print(args)
 
   if args.dir is not None:
@@ -389,7 +390,7 @@ if __name__ == "__main__":
   #gcpt = gcpt[242:]#[::-1]
 
   if args.show:
-    gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads)
+    gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, xs_path=args.xs, sorted_by=lambda x: -x.eval_run_hours)
     #gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
       #state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.get_simulation_cps())
       #state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: x.get_ipc())
@@ -444,6 +445,6 @@ if __name__ == "__main__":
     print("First:", gcpt[0])
     print("Last: ", gcpt[-1])
     input("Please check and press enter to continue")
-    xs_run(gcpt, args.xs, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
+    xs_run(gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
     
     # AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "maxpicca@qq.com")

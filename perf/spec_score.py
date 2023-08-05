@@ -4,7 +4,7 @@ import os
 
 def get_spec_reftime(benchspec, spec_version):
   if spec_version == 2006:
-    base_path = "/nfs/home/share/cpu2006v99/benchspec/CPU2006"
+    base_path = "/nfs/home/qiminhao/Downloads/CPU2006"
     for dirname in os.listdir(base_path):
       if benchspec in dirname:
         reftime_path = os.path.join(base_path, dirname, "data/ref/reftime")
