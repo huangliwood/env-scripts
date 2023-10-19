@@ -39,6 +39,7 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
     data = json.load(f)
   hour_list=[]
   perf_base_path = get_perf_base_path()
+  perf_base_path = get_perf_base_path()
   for benchspec in data:
     for point in data[benchspec]:
       weight = data[benchspec][point]
@@ -63,10 +64,12 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
         hour_list.append(hour)
         all_gcpt.append(gcpt)
   print(f"evaluate execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
+  print(f"evaluate execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
 
   if sorted_by is not None:
     all_gcpt = sorted(all_gcpt, key=sorted_by)
     hour_list = [g.eval_run_hours for g in all_gcpt]
+    print(f"opitimize execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
     print(f"opitimize execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
   
   dump_json = True
@@ -95,6 +98,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
     sys.exit("unsupported xs emu command line options, use nanhu or kunminghu")
   # base_arguments = [emu_path, '-W', str(warmup), '-I', str(max_instr), '-i']
   proc_count, finish_count = 0, 0
+  max_pending_proc = maxThreads // threads
   max_pending_proc = maxThreads // threads
   pending_proc, error_proc = [], []
   free_cores = list(range(max_pending_proc))
@@ -131,6 +135,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
             start_core = threads * allocate_core
             end_core = threads * allocate_core + threads - 1
             numa_node = 1 if start_core >= 64 else 0
+            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+maxThreads}-{end_core+maxThreads}"]
             numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+maxThreads}-{end_core+maxThreads}"]
             numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core}-{end_core}"]
           workload_path = workload.get_bin_path()
@@ -342,6 +347,7 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
     plt.legend()
     plt.title(topname)
   plt.savefig(f'{get_perf_base_path()}_topdown.svg', bbox_inches='tight')
+  plt.savefig(f'{get_perf_base_path()}_topdown.svg', bbox_inches='tight')
   # for benchspec,top in gcpt_top_down.items():
   #   bottom = [0.0]
   #   for key,value in top.down.items():
@@ -350,6 +356,7 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
   #     bottom = list(map(lambda x,y: x + y, bottom, percentage))
   # plt.legend()
   # plt.savefig(f'{get_perf_base_path()}_topdown/{top.name}.png')
+  # plt.savefig(f'{get_perf_base_path()}_topdown/{top.name}.png')
   # plt.clf()
   #print(f"Number of Checkpoints: {len(all_gcpt)}")
   #print(f"SPEC CPU Version: SPEC CPU{spec_version}, {isa}")
@@ -357,7 +364,10 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
 
 def xs_show(all_gcpt):
   i=0
+  i=0
   for gcpt in all_gcpt:
+    gcpt.show(i)
+    i+=1
     gcpt.show(i)
     i+=1
 
@@ -408,6 +418,7 @@ if __name__ == "__main__":
     args.ref = args.xs
 
   if args.show:
+    gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, xs_path=args.xs, sorted_by=lambda x: -x.eval_run_hours)
     gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, xs_path=args.xs, sorted_by=lambda x: -x.eval_run_hours)
     #gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
       #state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.get_simulation_cps())
@@ -474,6 +485,7 @@ if __name__ == "__main__":
     print("First:", gcpt[0])
     print("Last: ", gcpt[-1])
     input("Please check and press enter to continue")
+    xs_run(gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
     xs_run(gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
     
     # AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "maxpicca@qq.com")
