@@ -19,13 +19,14 @@ import top_down_report
 from gcpt_run_time_eval import *
 from gcpt import GCPT
 import AutoEmailAlert
+import multiprocessing
 
-tasks_dir = "SPEC06_EmuTasks_10_22_2021"
-
-def get_perf_base_path(xs_path):
-  if os.path.isabs(tasks_dir):
-    return tasks_dir
-  return os.path.join(xs_path, tasks_dir)
+TASKS_DIR = "SPEC06_EmuTasks_10_22_2021"
+maxThreads = 112 #int(multiprocessing.cpu_count()/2)
+def get_perf_base_path():
+  if os.path.isabs(TASKS_DIR):
+    return TASKS_DIR
+  return os.path.join(os.path.dirname("."), TASKS_DIR)
 
 def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None, sorted_by=None):
   perf_filter = [
@@ -37,7 +38,7 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
   with open(json_path) as f:
     data = json.load(f)
   hour_list=[]
-  perf_base_path = get_perf_base_path(xs_path)
+  perf_base_path = get_perf_base_path()
   for benchspec in data:
     for point in data[benchspec]:
       weight = data[benchspec][point]
@@ -61,12 +62,12 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
       if perf_match and state_match:
         hour_list.append(hour)
         all_gcpt.append(gcpt)
-  print(f"evaluate execute hours: {cal_exe_hours(hour_list, 128 // threads)}")
+  print(f"evaluate execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
 
   if sorted_by is not None:
     all_gcpt = sorted(all_gcpt, key=sorted_by)
     hour_list = [g.eval_run_hours for g in all_gcpt]
-    print(f"opitimize execute hours: {cal_exe_hours(hour_list, 128 // threads)}")
+    print(f"opitimize execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
   
   dump_json = True
   dump_json = False
@@ -80,13 +81,12 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
       json.dump(json_dict, f)
   return all_gcpt
 
-def xs_run(workloads, xs_path, warmup, max_instr, threads, cmdline_opt):
-  emu_path = os.path.join(xs_path, "build/emu")
+def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt):
   nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-nemu-interpreter-so")
   #nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-spike-so")
   base_arguments = []
   if cmdline_opt == "nanhu":
-    base_arguments = [emu_path, '--diff', nemu_so_path, '--dump-tl', '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
+    base_arguments = [emu_path, '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
   elif cmdline_opt == "kunminghu":
     base_arguments = [emu_path, '--diff', nemu_so_path, '--dump-db', '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
   elif cmdline_opt == "nutshell":
@@ -95,7 +95,7 @@ def xs_run(workloads, xs_path, warmup, max_instr, threads, cmdline_opt):
     sys.exit("unsupported xs emu command line options, use nanhu or kunminghu")
   # base_arguments = [emu_path, '-W', str(warmup), '-I', str(max_instr), '-i']
   proc_count, finish_count = 0, 0
-  max_pending_proc = 128 // threads
+  max_pending_proc = maxThreads // threads
   pending_proc, error_proc = [], []
   free_cores = list(range(max_pending_proc))
   # skip CI cores
@@ -131,22 +131,33 @@ def xs_run(workloads, xs_path, warmup, max_instr, threads, cmdline_opt):
             start_core = threads * allocate_core
             end_core = threads * allocate_core + threads - 1
             numa_node = 1 if start_core >= 64 else 0
-            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+128}-{end_core+128}"]
+            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+maxThreads}-{end_core+maxThreads}"]
             numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core}-{end_core}"]
           workload_path = workload.get_bin_path()
           result_path = workload.get_res_dir()
           stdout_file = workload.get_out_path()
           stderr_file = workload.get_err_path()
+          skip = False
           if not os.path.exists(result_path):
-            os.makedirs(result_path, exist_ok=True)
-          with open(stdout_file, "w") as stdout, open(stderr_file, "w") as stderr:
-            random_seed = random.randint(0, 9999)
-            run_cmd = numa_cmd + base_arguments + [workload_path] + ["-s", f"{random_seed}"]
-            cmd_str = " ".join(run_cmd)
-            print(f"cmd {proc_count}: {cmd_str}")
-            proc = subprocess.Popen(run_cmd, stdout=stdout, stderr=stderr, preexec_fn=os.setsid)
-          pending_proc.append((workload, proc, allocate_core))
-          free_cores = free_cores[1:]
+            os.makedirs(result_path, exist_ok=False)
+          elif not args.override:
+            # check if previous finined 
+            with open(stdout_file, 'r') as f:
+              content = f.read()
+              if "ABORT" not in content.upper() and "IPC = -nan" not in content and "Host time spent:" in content:
+                  print(f"cmd {proc_count}: {numa_cmd+base_arguments+[workload_path]} previous sim exisited ,skipping...")
+                  skip=True
+              # else :
+                  #print(f"cmd {proc_count}: {numa_cmd+base_arguments+[workload_path]} need override")
+          if not skip:
+            with open(stdout_file, "w") as stdout, open(stderr_file, "w") as stderr:
+              random_seed = random.randint(0, 9999)
+              run_cmd = numa_cmd + base_arguments + [workload_path] + ["-s", f"{random_seed}"]
+              cmd_str = " ".join(run_cmd)
+              print(f"cmd {proc_count}: {cmd_str}")
+              proc = subprocess.Popen(run_cmd, stdout=stdout, stderr=stderr, preexec_fn=os.setsid)
+              pending_proc.append((workload, proc, allocate_core))
+              free_cores = free_cores[1:]
           proc_count += 1
       workloads = workloads[can_launch:]
   except KeyboardInterrupt:
@@ -194,7 +205,7 @@ def get_all_manip():
     return all_manip
 
 def get_total_inst(benchspec, spec_version, isa):
-  base_dir = "/nfs-nvme/home/share/checkpoints_profiles"
+  base_dir = "/nfs/share/checkpoints_profiles"
   if spec_version == 2006:
     if isa == "rv64gc_old":
       base_path = os.path.join(base_dir, "spec06_rv64gc_o2_50m/profiling")
@@ -259,7 +270,7 @@ def xs_report_ipc(xs_path, gcpt_queue, result_queue):
     else:
       print("IPC not found in", gcpt.benchspec, gcpt.point, gcpt.weight)
 
-def xs_report(all_gcpt, xs_path, spec_version, isa, num_jobs):
+def xs_report(all_gcpt, xs_path, spec_version, isa, num_jobs,enPrint= True):
   # frequency/GHz
   frequency = 2
   gcpt_ipc = dict()
@@ -281,27 +292,30 @@ def xs_report(all_gcpt, xs_path, spec_version, isa, num_jobs):
   while not result_queue.empty():
     result = result_queue.get()
     gcpt_ipc[result[0]].append(result[1])
-  print("=================== Coverage ==================")
+  if enPrint:
+    print("=================== Coverage ==================")
   spec_time = {}
   for benchspec in gcpt_ipc:
     total_weight = sum(map(lambda info: info[0], gcpt_ipc[benchspec]))
     total_cpi = sum(map(lambda info: info[0] / info[1], gcpt_ipc[benchspec])) / total_weight
     num_instr = get_total_inst(benchspec, spec_version, isa)
     num_seconds = total_cpi * num_instr / (frequency * (10 ** 9))
-    print(f"{benchspec:>25} coverage: {total_weight:.2f}")
+    if enPrint:
+      print(f"{benchspec:>25} coverage: {total_weight:.2f}")
     spec_name = benchspec.split("_")[0]
     spec_time[spec_name] = spec_time.get(spec_name, 0) + num_seconds
   print()
-  spec_score.get_spec_score(spec_time, spec_version, frequency)
-  print(f"Number of Checkpoints: {len(all_gcpt)}")
-  print(f"SPEC CPU Version: SPEC CPU{spec_version}, {isa}")
+  spec_score.get_spec_score(args,spec_time, spec_version, frequency, enPrint)
+  if enPrint:
+    print(f"Number of Checkpoints: {len(all_gcpt)}")
+    print(f"SPEC CPU Version: SPEC CPU{spec_version}, {isa}")
 
 def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
   gcpt_top_down = dict()
   keys = list(map(lambda gcpt: gcpt.benchspec, all_gcpt))
   for k in keys:
     gcpt_top_down[k.split("_")[0]] = dict()
-  graph_num = top_down_report.xs_report_top_down_tf(get_perf_base_path(xs_path), all_gcpt, gcpt_top_down)
+  graph_num = top_down_report.xs_report_top_down_tf(get_perf_base_path, all_gcpt, gcpt_top_down)
   plt.figure(figsize=(25,45))
   for i in range(graph_num):
     plt.subplot((graph_num + 1) // 2, 2, i + 1)
@@ -327,7 +341,7 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
     plt.xticks(rotation=90)
     plt.legend()
     plt.title(topname)
-  plt.savefig(f'{get_perf_base_path(xs_path)}_topdown.svg', bbox_inches='tight')
+  plt.savefig(f'{get_perf_base_path()}_topdown.svg', bbox_inches='tight')
   # for benchspec,top in gcpt_top_down.items():
   #   bottom = [0.0]
   #   for key,value in top.down.items():
@@ -335,15 +349,17 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
   #     plt.bar([benchspec], percentage, bottom=bottom, label=key)
   #     bottom = list(map(lambda x,y: x + y, bottom, percentage))
   # plt.legend()
-  # plt.savefig(f'{get_perf_base_path(xs_path)}_topdown/{top.name}.png')
+  # plt.savefig(f'{get_perf_base_path()}_topdown/{top.name}.png')
   # plt.clf()
   #print(f"Number of Checkpoints: {len(all_gcpt)}")
   #print(f"SPEC CPU Version: SPEC CPU{spec_version}, {isa}")
 
 
 def xs_show(all_gcpt):
+  i=0
   for gcpt in all_gcpt:
-    gcpt.show()
+    gcpt.show(i)
+    i+=1
 
 def xs_debug(all_gcpt):
   for gcpt in all_gcpt:
@@ -351,16 +367,18 @@ def xs_debug(all_gcpt):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="autorun script for xs")
-  parser.add_argument('gcpt_path', metavar='gcpt_path', type=str,
-                      help='path to gcpt checkpoints')
-  parser.add_argument('json_path', metavar='json_path', type=str,
-                      help='path to gcpt json')
-  parser.add_argument('--xs', help='path to xs')
+  parser.add_argument('--gcpt_path', metavar='gcpt_path', type=str,
+                      help='path to gcpt checkpoints',default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt")
+  parser.add_argument('--json_path', metavar='json_path', type=str,
+                      help='path to gcpt json',default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_coverage0.3_test.json")
+  parser.add_argument('--xs',type=str, help='path to xs')
+  parser.add_argument('--emu', help='path to emu',default=f"./build/emu")
   parser.add_argument('--cmdline-opt', default="nanhu", type=str, help='xs emu command line options, nanhu or kunminghu')
   parser.add_argument('--ref', default=None, type=str, help='path to ref')
-  parser.add_argument('--warmup', '-W', default=20000000, type=int, help="warmup instr count")
+  parser.add_argument('--warmup', '-W', default=5000000, type=int, help="warmup instr count")
   parser.add_argument('--max-instr', '-I', default=40000000, type=int, help="max instr count")
-  parser.add_argument('--threads', '-T', default=1, type=int, help="number of emu threads")
+  parser.add_argument('--threads', '-T', default=16, type=int, help="number of emu threads")
+  parser.add_argument('--maxthreads', '-t', default=0, type=int, help="number of emu threads")
   parser.add_argument('--report', '-R', action='store_true', default=False, help='report only')
   parser.add_argument('--report-top-down', action='store_true', default=False, help='report top-down only')
   parser.add_argument('--show', '-S', action='store_true', default=False, help='show list of gcpt only')
@@ -370,26 +388,27 @@ if __name__ == "__main__":
   parser.add_argument('--slice', help='select only some checkpoints (only for run)')
   parser.add_argument('--dir', default=None, type=str, help='SPECTasks dir')
   parser.add_argument('--jobs', '-j', default=1, type=int, help="processing files in 'j' threads")
-  parser.add_argument('--resume', action='store_true', default=False, help="continue to exe, ignore the aborted and success tests")
+  parser.add_argument('--override', action='store_true', default=False, help="continue to exe, ignore the aborted and success tests")
+  parser.add_argument('--pf', action='store_true', default=False, help="specify  for prefetcher")
+  parser.add_argument('--all', action='store_true', default=False, help="report regression for specify directory's all subdirectories ")
 
   args = parser.parse_args()
-
   print(args)
-
+  
+  if args.maxthreads != 0:
+    maxThreads = args.maxthreads
+  
+  if args.pf:
+    args.json_path=os.path.abspath("config/prefetch_simpoint_coverage0.3_test.json")
+    
   if args.dir is not None:
-    tasks_dir = args.dir
+    TASKS_DIR = args.dir
 
   if args.ref is None:
     args.ref = args.xs
 
-  # gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads)
-  # gcpt = gcpt#[300:]#[::-1]
-  #gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
-  #        state_filter=[GCPT.STATE_RUNNING, GCPT.STATE_NONE, GCPT.STATE_ABORTED], xs_path=args.ref)
-  #gcpt = gcpt[242:]#[::-1]
-
   if args.show:
-    gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads)
+    gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, xs_path=args.xs, sorted_by=lambda x: -x.eval_run_hours)
     #gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
       #state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.get_simulation_cps())
       #state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: x.get_ipc())
@@ -403,17 +422,28 @@ if __name__ == "__main__":
       state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: -x.num_cycles)
     xs_debug(gcpt)
   elif args.report:
-    gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
-      state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
-    xs_report(gcpt, args.ref, args.version, args.isa, args.jobs)
+    if args.all:
+      root_dir = args.dir
+      data_dirList = [dirs for dirs in os.listdir(args.dir) if os.path.isdir(os.path.join(args.dir, dirs))]
+      for batchDir in data_dirList:
+        TASKS_DIR = os.path.abspath(f"{root_dir}/{batchDir}/")
+        args.dir = TASKS_DIR
+        gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
+          state_filter=[GCPT.STATE_FINISHED], xs_path=None, sorted_by=lambda x: x.benchspec.lower())
+        if gcpt:
+          print(f"------------------------------------------------------------\n{TASKS_DIR}")
+          xs_report(gcpt, args.ref, args.version, args.isa, args.jobs,enPrint=False)
+    else:
+      gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
+        state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
+      xs_report(gcpt, args.ref, args.version, args.isa, args.jobs)
   elif args.report_top_down:
     gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
       state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
     xs_report_top_down(gcpt, args.ref, args.version, args.isa, args.jobs)
   else:
     state_filter = None
-    print("RESUME:", args.resume)
-    if (args.resume):
+    if (not args.override):
       state_filter = [GCPT.STATE_RUNNING, GCPT.STATE_NONE]
     # If just wanna run aborted test, change the script.
     gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
@@ -429,7 +459,7 @@ if __name__ == "__main__":
     #                      state_filter=[GCPT.STATE_RUNNING], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
     if (len(gcpt) == 0):
       print("All the tests are already finished.")
-      print(f"perf_base_path: {get_perf_base_path(args.xs)}")
+      print(f"perf_base_path: {get_perf_base_path()}")
       sys.exit()
     if args.slice:
       start, end = args.slice.split(":")
@@ -444,6 +474,6 @@ if __name__ == "__main__":
     print("First:", gcpt[0])
     print("Last: ", gcpt[-1])
     input("Please check and press enter to continue")
-    xs_run(gcpt, args.xs, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
+    xs_run(gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
     
     # AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "maxpicca@qq.com")

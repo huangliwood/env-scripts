@@ -156,7 +156,7 @@ def process_one(ctr):
   return list(reversed(top.get_nodes()))
 
 
-def top_down_get_ctr(perf_path):
+def top_down_get_ctr(perf_path,gcpt):
   counters = perf.PerfCounters(perf_path)
   # when the spec has not finished, clock_cycle may be None
   if counters[f"core_with_l2.core.ctrlBlock.rob.clock_cycle"] is None:
@@ -206,9 +206,9 @@ def top_down_get_ctr(perf_path):
 
 def xs_report_top_down_tf(perf_base_path, all_gcpt, gcpt_top_down):
   for gcpt in all_gcpt:
-    perf_path = gcpt.err_path(perf_base_path)
-    ctr = top_down_get_ctr(perf_path)
-    
+    perf_path = gcpt.get_err_path()
+    ctr = top_down_get_ctr(perf_path,gcpt=gcpt)
+    print(perf_path)
     for k,v in ctr.items():
       if k in gcpt_top_down[gcpt.benchspec.split("_")[0]].keys():
         gcpt_top_down[gcpt.benchspec.split("_")[0]][k] += v * float(gcpt.weight)

@@ -1,10 +1,10 @@
 #! /usr/bin/env python3
 import argparse
 import os
-
+import pandas as pd
 def get_spec_reftime(benchspec, spec_version):
   if spec_version == 2006:
-    base_path = "/nfs/home/share/cpu2006v99/benchspec/CPU2006"
+    base_path = "/nfs/home/qiminhao/Downloads/CPU2006"
     for dirname in os.listdir(base_path):
       if benchspec in dirname:
         reftime_path = os.path.join(base_path, dirname, "data/ref/reftime")
@@ -97,8 +97,11 @@ def get_spec_fp(spec_version):
   return None
 
 
-def get_spec_score(spec_time, spec_version, frequency):
-  print("==================== Score ===================")
+def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
+  data = []
+  if enPrint:
+    print("==================== Score ===================")
+  data.append(["Score","",""])
   total_count = 0
   total_score = 1
   spec_score = dict()
@@ -109,13 +112,19 @@ def get_spec_score(spec_time, spec_version, frequency):
     score = reftime / spec_time[spec_name]
     total_count += 1
     total_score *= score
-    print(f"{spec_name:>15}: {score:6.3f}, {score / frequency:6.3f}")
+    if enPrint:
+      print(f"{spec_name:>15}: {score:6.3f}, {score / frequency:6.3f}")
+    data.append([spec_name, score, score / frequency])
     spec_score[spec_name] = score
   geomean_score = total_score ** (1 / total_count)
-  print(f"SPEC{spec_version}@{frequency}GHz: {geomean_score:6.3f}")
-  print(f"SPEC{spec_version}/GHz:  {geomean_score / frequency:6.3f}")
-  print()
-  print(f"********* SPECINT {spec_version} *********")
+  if enPrint:
+    print(f"SPEC{spec_version}@{frequency}GHz: {geomean_score:6.3f}")
+    print(f"SPEC{spec_version}/GHz:  {geomean_score / frequency:6.3f}")
+  data.append([f"SPEC{spec_version}@GHz", geomean_score,geomean_score / frequency])
+  if enPrint:
+    print()
+    print(f"********* SPECINT {spec_version} *********")
+  data.append([f"SPECINT {spec_version}","",""])
   specint_list = get_spec_int(spec_version)
   specint_score = 1
   for benchspec in specint_list:
@@ -125,14 +134,21 @@ def get_spec_score(spec_time, spec_version, frequency):
         found = True
         score = spec_score[name]
         specint_score *= score
-        print(f"{benchspec:>15}: {score:6.3f}, {score / frequency:6.3f}")
+        if enPrint:
+          print(f"{benchspec:>15}: {score:6.3f}, {score / frequency:6.3f}")
+        data.append([benchspec, score, score / frequency])
     if not found:
-      print(f"{benchspec:>15}: N/A")
+      # print(f"{benchspec:>15}: N/A")
+      continue
   geomean_specint_score = specint_score ** (1 / len(specint_list))
-  print(f"SPECint{spec_version}@{frequency}GHz: {geomean_specint_score:6.3f}")
-  print(f"SPECint{spec_version}/GHz:  {geomean_specint_score / frequency:6.3f}")
-  print()
-  print(f"********* SPECFP  {spec_version} *********")
+  if enPrint:
+    print([f"SPECint{spec_version}@{frequency}GHz: {geomean_specint_score:6.3f}"])
+    print([f"SPECint{spec_version}/GHz:  {geomean_specint_score / frequency:6.3f}"])
+  data.append([f"SPECint{spec_version}@GHz:", geomean_specint_score,geomean_specint_score / frequency])
+  if enPrint:
+    print()
+    print(f"********* SPECFP  {spec_version} *********")
+  data.append([f"SPECFP  {spec_version}","",""])
   specfp_list = get_spec_fp(spec_version)
   specfp_score = 1
   for benchspec in specfp_list:
@@ -142,12 +158,43 @@ def get_spec_score(spec_time, spec_version, frequency):
         found = True
         score = spec_score[name]
         specfp_score *= score
-        print(f"{benchspec:>15}: {score:6.3f}, {score / frequency:6.3f}")
+        if enPrint:
+          print(f"{benchspec:>15}: {score:6.3f}, {score / frequency:6.3f}")
+        data.append([benchspec,score, score / frequency])
     if not found:
+      continue
       print(f"{benchspec:>15}: N/A")
   geomean_specfp_score = specfp_score ** (1 / len(specfp_list))
-  print(f"SPECfp{spec_version}@{frequency}GHz: {geomean_specfp_score:6.3f}")
-  print(f"SPECfp{spec_version}/GHz: {geomean_specfp_score / frequency:6.3f}")
+  
+  if enPrint:
+    print(f"SPECfp{spec_version}@{frequency}GHz: {geomean_specfp_score:6.3f}")
+    print(f"SPECfp{spec_version}/GHz: {geomean_specfp_score / frequency:6.3f}")
+  data.append([f"SPECfp{spec_version}@GHz:", geomean_specfp_score, geomean_specfp_score / frequency])
+
+
+  dir = os.path.abspath(args.dir)
+  if args.pf:
+    name = os.path.basename(args.dir) + "_pf"
+  else:
+    name = os.path.basename(args.dir)
+  excel_path =f"{os.path.dirname(dir)}/result.xlsx"
+  print(f"save data to {os.path.dirname(dir),f'result.xlsx'} sheet:{name}")
+  
+  df = pd.DataFrame(data, columns=['BenchSpec', f'{name}@2GHZ', f'{name}@1GHz'])
+  if os.path.exists(excel_path):
+    with pd.ExcelFile(excel_path) as xls:
+        sheets = xls.sheet_names
+    original_name = name
+    counter = 1
+    while name in sheets:
+        name = f"{original_name}_{counter}"
+        counter += 1
+
+    with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
+        df.to_excel(writer, sheet_name=name, index=False)
+  else:
+    with pd.ExcelWriter(f"{os.path.dirname(dir)}/result.xlsx", engine='openpyxl') as writer:
+          df.to_excel(writer, sheet_name=name, index=False)
   print()
 
 

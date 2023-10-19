@@ -88,9 +88,10 @@ class GCPT(object):
               print(f"cp {wave_path} {self.get_res_dir()}")
               shutil.copy(wave_path, self.get_res_dir())
 
-  def show(self):
+  def show(self,number):
     self.get_state()
     attributes = {
+      "id:": number,
       "instrCnt": self.num_instrs,
       "cycleCnt": self.num_cycles,
       "totalIPC": f"{self.get_ipc():.3f}",
