@@ -399,7 +399,7 @@ if __name__ == "__main__":
   parser.add_argument('--dir', default=None, type=str, help='SPECTasks dir')
   parser.add_argument('--jobs', '-j', default=1, type=int, help="processing files in 'j' threads")
   parser.add_argument('--override', action='store_true', default=False, help="continue to exe, ignore the aborted and success tests")
-  parser.add_argument('--pf', action='store_true', default=False, help="specify  for prefetcher")
+  parser.add_argument('--pf', action='store_true', default=False, help="specify for prefetcher")
   parser.add_argument('--all', action='store_true', default=False, help="report regression for specify directory's all subdirectories ")
 
   args = parser.parse_args()
@@ -418,7 +418,6 @@ if __name__ == "__main__":
     args.ref = args.xs
 
   if args.show:
-    gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, xs_path=args.xs, sorted_by=lambda x: -x.eval_run_hours)
     gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, xs_path=args.xs, sorted_by=lambda x: -x.eval_run_hours)
     #gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
       #state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.get_simulation_cps())
@@ -455,19 +454,15 @@ if __name__ == "__main__":
   else:
     state_filter = None
     if (not args.override):
-      state_filter = [GCPT.STATE_RUNNING, GCPT.STATE_NONE]
+      state_filter = [GCPT.STATE_ABORTED, GCPT.STATE_RUNNING, GCPT.STATE_NONE]
+      
     # If just wanna run aborted test, change the script.
     gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
                          state_filter=state_filter, 
                          xs_path=args.xs, 
                          sorted_by=lambda x: -x.eval_run_hours
                          )
-    # gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
-    #                      state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: -x.num_cycles)
-    #                      state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: -x.num_cycles)
-    #                      state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
-    #                      state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: x.get_ipc())
-    #                      state_filter=[GCPT.STATE_RUNNING], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
+
     if (len(gcpt) == 0):
       print("All the tests are already finished.")
       print(f"perf_base_path: {get_perf_base_path()}")
@@ -486,6 +481,5 @@ if __name__ == "__main__":
     print("Last: ", gcpt[-1])
     input("Please check and press enter to continue")
     xs_run(gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
-    xs_run(gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
     
-    # AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "maxpicca@qq.com")
+    AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "huanghualiwood@163.com")
