@@ -1,15 +1,20 @@
 #! /usr/bin/env python3
 
 import argparse
+import array
 import json
+import math
 import os
 import sys
 import random
 import shutil
 import signal
 import subprocess
+import threading
 import time
+import psutil
 from multiprocessing import Process, Queue
+from colorama import Fore
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -22,7 +27,7 @@ import AutoEmailAlert
 import multiprocessing
 
 TASKS_DIR = "SPEC06_EmuTasks_10_22_2021"
-maxThreads = 112 #int(multiprocessing.cpu_count()/2)
+MAX_THREADS = 112 #int(multiprocessing.cpu_count()/2)
 def get_perf_base_path():
   if os.path.isabs(TASKS_DIR):
     return TASKS_DIR
@@ -63,14 +68,14 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
       if perf_match and state_match:
         hour_list.append(hour)
         all_gcpt.append(gcpt)
-  print(f"evaluate execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
-  print(f"evaluate execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
+  print(f"evaluate execute hours: {cal_exe_hours(hour_list, MAX_THREADS // threads)}")
+  print(f"evaluate execute hours: {cal_exe_hours(hour_list, MAX_THREADS // threads)}")
 
   if sorted_by is not None:
     all_gcpt = sorted(all_gcpt, key=sorted_by)
     hour_list = [g.eval_run_hours for g in all_gcpt]
-    print(f"opitimize execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
-    print(f"opitimize execute hours: {cal_exe_hours(hour_list, maxThreads // threads)}")
+    print(f"opitimize execute hours: {cal_exe_hours(hour_list, MAX_THREADS // threads)}")
+    print(f"opitimize execute hours: {cal_exe_hours(hour_list, MAX_THREADS // threads)}")
   
   dump_json = True
   dump_json = False
@@ -84,12 +89,43 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
       json.dump(json_dict, f)
   return all_gcpt
 
+pending_proc, error_proc = [], []
+
+def get_available_threads():
+  cpu_percentages = psutil.cpu_percent(percpu=True)
+  free_threads = [1] * (int(MAX_THREADS))
+  for i, percentage in enumerate(cpu_percentages)  :
+    if i < MAX_THREADS:
+      coreId = i
+      if percentage < 0.4:
+        free_threads[coreId] = 0
+
+  return free_threads
+  
+def get_free_cores(free_threads):
+  sequence_len = 16
+  sequence = [0] * 16
+  start_positions = []
+  i=0
+  while i < len(free_threads) - sequence_len + 1:
+      curr_slice = free_threads[i:i+sequence_len]
+      if  curr_slice.count(1) < 4:
+          start_positions.append(i)
+          i += sequence_len  
+      else:
+          i += 1
+
+  start_positions = [math.ceil(pos / 16) * 16 for pos in start_positions]
+  free_cores = [pos // 16 for pos in start_positions]
+
+  return free_cores
+
 def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt):
   nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-nemu-interpreter-so")
   #nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-spike-so")
   base_arguments = []
   if cmdline_opt == "nanhu":
-    base_arguments = [emu_path, '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
+    base_arguments = [emu_path, '--diff', nemu_so_path, '-W', str(warmup), '-I', str(max_instr), '-i']
   elif cmdline_opt == "kunminghu":
     base_arguments = [emu_path, '--diff', nemu_so_path, '--dump-db', '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
   elif cmdline_opt == "nutshell":
@@ -98,24 +134,30 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
     sys.exit("unsupported xs emu command line options, use nanhu or kunminghu")
   # base_arguments = [emu_path, '-W', str(warmup), '-I', str(max_instr), '-i']
   proc_count, finish_count = 0, 0
-  max_pending_proc = maxThreads // threads
-  max_pending_proc = maxThreads // threads
-  pending_proc, error_proc = [], []
-  free_cores = list(range(max_pending_proc))
+  free_threads = get_available_threads()
+  free_cores = get_free_cores(free_threads)
+  real_maxThreads = free_threads.count(0)
+  max_pending_proc =  int(real_maxThreads / 16)
+
   # skip CI cores
   ci_cores = []#list(range(0, 64))# + list(range(32, 48))
   for core in list(map(lambda x: x // threads, ci_cores)):
     if core in free_cores:
       free_cores.remove(core)
       max_pending_proc -= 1
-  print("Free cores:", free_cores)
+      
+  start_time = time.time()
+  timeStamp=61
   try:
-    while len(workloads) > 0 or len(pending_proc) > 0:
+    while len(workloads) > 0 or len(pending_proc) > 0:        
       has_pending_workload = len(workloads) > 0 and len(pending_proc) >= max_pending_proc
       has_pending_proc = len(pending_proc) > 0
       if has_pending_workload or has_pending_proc:
           finished_proc = list(filter(lambda p: p[1].poll() is not None, pending_proc))
           for workload, proc, core in finished_proc:
+            # real_maxThreads = get_available_threads()
+            # max_pending_proc = int(real_maxThreads / 16)
+            
             print(f"{workload} has finished")
             pending_proc.remove((workload, proc, core))
             free_cores.append(core)
@@ -135,8 +177,8 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
             start_core = threads * allocate_core
             end_core = threads * allocate_core + threads - 1
             numa_node = 1 if start_core >= 64 else 0
-            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+maxThreads}-{end_core+maxThreads}"]
-            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+maxThreads}-{end_core+maxThreads}"]
+            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+MAX_THREADS}-{end_core+MAX_THREADS}"]
+            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+MAX_THREADS}-{end_core+MAX_THREADS}"]
             numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core}-{end_core}"]
           workload_path = workload.get_bin_path()
           result_path = workload.get_res_dir()
@@ -165,6 +207,17 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
               free_cores = free_cores[1:]
           proc_count += 1
       workloads = workloads[can_launch:]
+      
+      # timeStamp=timeStamp + 1
+      # if timeStamp > 60:
+      #   timeStamp = 0
+      #   real_maxThreads = get_available_threads()
+      #   max_pending_proc = int(real_maxThreads / 16)
+      #   free_cores = list(range(max_pending_proc))
+      #   print("Free cores:", free_cores)
+      #   if len(free_cores) == 0:
+      #     print("has no free core,waiting...")
+          
   except KeyboardInterrupt:
     print("Interrupted. Exiting all programs ...")
     print("Not finished:")
@@ -178,6 +231,8 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
     print("Errors:")
     for i, workload in enumerate(error_proc):
       print(f"  ({i + 1}) {workload}")
+  used_time = time.time() - start_time
+  print(Fore.GREEN+f"[{used_time/60:.2f} min]")
 
 
 def get_all_manip():
@@ -386,7 +441,7 @@ if __name__ == "__main__":
   parser.add_argument('--cmdline-opt', default="nanhu", type=str, help='xs emu command line options, nanhu or kunminghu')
   parser.add_argument('--ref', default=None, type=str, help='path to ref')
   parser.add_argument('--warmup', '-W', default=5000000, type=int, help="warmup instr count")
-  parser.add_argument('--max-instr', '-I', default=40000000, type=int, help="max instr count")
+  parser.add_argument('--max-instr', '-I', default=20000000, type=int, help="max instr count")
   parser.add_argument('--threads', '-T', default=16, type=int, help="number of emu threads")
   parser.add_argument('--maxthreads', '-t', default=0, type=int, help="number of emu threads")
   parser.add_argument('--report', '-R', action='store_true', default=False, help='report only')
@@ -400,16 +455,19 @@ if __name__ == "__main__":
   parser.add_argument('--jobs', '-j', default=1, type=int, help="processing files in 'j' threads")
   parser.add_argument('--override', action='store_true', default=False, help="continue to exe, ignore the aborted and success tests")
   parser.add_argument('--pf', action='store_true', default=False, help="specify for prefetcher")
+  parser.add_argument('--pfFast', action='store_true', default=False, help="specify for prefetcher fast")
   parser.add_argument('--all', action='store_true', default=False, help="report regression for specify directory's all subdirectories ")
 
   args = parser.parse_args()
   print(args)
   
   if args.maxthreads != 0:
-    maxThreads = args.maxthreads
+    MAX_THREADS = args.maxthreads
   
   if args.pf:
     args.json_path=os.path.abspath("config/prefetch_simpoint_coverage0.3_test.json")
+  if args.pfFast:
+    args.json_path=os.path.abspath("config/prefetchFast_simpoint_coverage0.3_test.json")
     
   if args.dir is not None:
     TASKS_DIR = args.dir
@@ -482,4 +540,4 @@ if __name__ == "__main__":
     input("Please check and press enter to continue")
     xs_run(gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads, args.cmdline_opt)
     
-    AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "huanghualiwood@163.com")
+    # AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "huanghualiwood@163.com")

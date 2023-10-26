@@ -14,7 +14,8 @@ class PerfManip(object):
         self.name = name
         self.counters = counters
         self.func = func
-
+    def __str__(self):
+            return f"{self.name}: Counters: {self.counters}"
 
 class PerfCounters(object):
     perf_re = re.compile(r'.*\[PERF \]\[time=\s+\d+\] (([a-zA-Z0-9_]+\.)+[a-zA-Z0-9_]+): ((\w| |\')+),\s+(\d+)$')
@@ -464,176 +465,221 @@ def get_wpu_manip():
     ))
     return all_manip
 
+
+def get_l2_manip():
+    all_manip = []
+    # Flip rate
+    all_manip.append(PerfManip(
+        name = "l2_A_req_hitRate",
+        counters = [
+            "L2_a_req_hit","L2_a_req_miss"
+        ],
+        func = lambda hit, miss: hit / (hit + miss)
+    ))
+    all_manip.append(PerfManip(
+        name = "l2_A_acquire_hitRate",
+        counters = [
+            "L2_a_acquire_hit","L2_a_acquire_miss"
+        ],
+        func = lambda hit, miss: hit / (hit + miss)
+    ))
+    all_manip.append(PerfManip(
+        name = "l2_A_req_getRate",
+        counters = [
+            "L2_a_get_hit","L2_a_get_miss"
+        ],
+        func = lambda hit, miss: hit / (hit + miss)
+    ))
+    all_manip.append(PerfManip(
+        name = "l2_prefetchReq_nums",
+        counters = [
+            "bop_send2_queue",
+            "sms_send2_queue",
+            "bop_send2_queue"
+        ],
+        func = lambda sms,bop,spp: sms + bop + spp
+    ))
+    all_manip.append(PerfManip(
+        name = "l2_prefetch_dead_block_nums",
+        counters = [
+            "prefetch_dead_block",
+        ],
+        func = lambda x: x
+    ))
+    return all_manip
+    
 def get_all_manip():
     all_manip = []
-    ipc = PerfManip(
-        name = "global.IPC",
-        counters = [f"clock_cycle",
-        f"commitInstr"],
-        func = lambda cycle, instr: instr * 1.0 / cycle
-    )
-    all_manip.append(ipc)
-    branch_mpki = PerfManip(
-        name = "global.branch_prediction_mpki",
-        counters = [f"ftq.BpWrong",
-        f"commitInstr"],
-        func = lambda wrong, instr: 1000 * wrong / instr
-    )
-    all_manip.append(branch_mpki)
-    load_latency = PerfManip(
-        name = "global.load_instr_latency",
-        counters = ["rob.load_latency_execute", "rob.load_instr_cnt"],
-        func = lambda latency, count: latency / count
-    )
-    all_manip.append(load_latency)
-    fma_latency = PerfManip(
-        name = "global.fma_instr_latency",
-        counters = ["rob.fmac_latency_execute_fma", "rob.fmac_instr_cnt_fma"],
-        func = lambda latency, count: latency / count if count != 0 else 0
-    )
-    all_manip.append(fma_latency)
-    icache_miss_rate = PerfManip(
-        name = "global.icache_miss_rate",
-        counters = [f"frontend.ifu.icache.req", f"frontend.ifu.icache.miss"],
-        func = lambda req, miss: miss / req
-    )
-    # all_manip.append(icache_miss_rate)
-    dtlb_miss_rate = PerfManip(
-        name = "global.dtlb_miss_rate",
-        counters = [f"memBlock.TLB.first_access0", f"memBlock.TLB.first_miss0",
-            f"memBlock.TLB_1.first_access0", f"memBlock.TLB_1.first_miss0",
-            f"memBlock.TLB_2.first_access0", f"memBlock.TLB_2.first_miss0",
-            f"memBlock.TLB_3.first_access0", f"memBlock.TLB_3.first_miss0"],
-        func = lambda req1, miss1, req2, miss2, req3, miss3, req4, miss4: (miss1 + miss2 + miss3 + miss4) / (req1 + req2 + req3 + req4) if ((req1 + req2 + req3 + req4) > 0) else 0
-    )
-    all_manip.append(dtlb_miss_rate)
-    dtlb_sa_percent = PerfManip(
-        name = "global.dtlb_sa_hit_percent",
-        counters = [f"memBlock.TLB.tlb_normal_sa.hit", f"memBlock.TLB.tlb_super_fa.hit",
-                   f"memBlock.TLB_1.tlb_normal_sa.hit", f"memBlock.TLB_1.tlb_super_fa.hit",
-                   f"memBlock.TLB_2.tlb_normal_sa.hit", f"memBlock.TLB_2.tlb_super_fa.hit",
-                   f"memBlock.TLB_3.tlb_normal_sa.hit", f"memBlock.TLB_3.tlb_super_fa.hit"],
-        func = lambda sa0, fa0, sa1, fa1, sa2, fa2, sa3, fa3: (sa0 + sa1 + sa2 + sa3) / (sa0 + sa1 + sa2 + sa3 + fa0 + fa1 + fa2 + fa3) if ((sa0 + sa1 + sa2 + sa3 + fa0 + fa1 + fa2 + fa3) > 0) else 0
-    )
-    all_manip.append(dtlb_sa_percent)
-    ldtlb_miss_rate = PerfManip(
-        name = "global.ldtlb_miss_rate",
-        # counters = [f"memBlock.TLB.first_access0", f"memBlock.TLB.first_miss0",
-        #     f"memBlock.TLB_1.first_access0", f"memBlock.TLB_1.first_miss0"],
-        # func = lambda req1, miss1, req2, miss2: (miss1 + miss2) / (req1 + req2) if ((req1 + req2) > 0) else 0
-        counters = [f"memBlock.dtlb_ld_tlb_ld.first_access0", f"memBlock.dtlb_ld_tlb_ld.first_miss0"],
-        func = lambda req, miss: 1.0*miss / req if (req > 0) else 0
-    )
-    all_manip.append(ldtlb_miss_rate)
-    ldtlb_sa_percent = PerfManip(
-        name = "global.ldtlb_sa_hit_percent",
-        counters = [f"memBlock.TLB.tlb_normal_sa.hit", f"memBlock.TLB.tlb_super_fa.hit",
-                   f"memBlock.TLB_1.tlb_normal_sa.hit", f"memBlock.TLB_1.tlb_super_fa.hit"],
-        func = lambda sa0, fa0, sa1, fa1: (sa0 + sa1) / (sa0 + sa1 + fa0 + fa1) if ((sa0 + sa1 + fa0 + fa1) > 0) else 0
-    )
-    all_manip.append(ldtlb_sa_percent)
-    sttlb_miss_rate = PerfManip(
-        name = "global.sttlb_miss_rate",
-        # counters = [f"memBlock.TLB_2.first_access0", f"memBlock.TLB_2.first_miss0",
-        #     f"memBlock.TLB_2.first_access0", f"memBlock.TLB_2.first_miss0"],
-        # func = lambda req1, miss1, req2, miss2: (miss1 + miss2) / (req1 + req2) if ((req1 + req2) > 0) else 0
-        counters = [f"memBlock.dtlb_st_tlb_st.first_access0", f"memBlock.dtlb_st_tlb_st.first_miss0"],
-        func = lambda req, miss: 1.0*miss / req if (req > 0) else 0
-    )
-    all_manip.append(sttlb_miss_rate)
-    sttlb_sa_percent = PerfManip(
-        name = "global.sttlb_sa_hit_percent",
-        counters = [f"memBlock.TLB_2.tlb_normal_sa.hit", f"memBlock.TLB_2.tlb_super_fa.hit",
-                   f"memBlock.TLB_3.tlb_normal_sa.hit", f"memBlock.TLB_3.tlb_super_fa.hit"],
-        func = lambda sa0, fa0, sa1, fa1: (sa0 + sa1) / (sa0 + sa1 + fa0 + fa1) if ((sa0 + sa1 + fa0 + fa1) > 0) else 0
-    )
-    all_manip.append(sttlb_sa_percent)
-    ptw_access_latency = PerfManip(
-        name = "global.ptw_access_latency",
-        counters = [f"dtlbRepeater.inflight_cycle", f"dtlbRepeater.ptw_req_count"],
-        func = lambda cycle, count: cycle / count if (count > 0) else 0
-    )
-    all_manip.append(ptw_access_latency)
-    dcache_load_miss_rate = PerfManip(
-        name = "global.dcache_load_miss_rate_first_issue",
-        counters = [f"LoadUnit_0.load_s2.in_fire_first_issue", f"LoadUnit_0.load_s2.dcache_miss_first_issue",
-            f"LoadUnit_1.load_s2.in_fire_first_issue", f"LoadUnit_1.load_s2.dcache_miss_first_issue"],
-        func = lambda req1, miss1, req2, miss2: (miss1 + miss2) / (req1 + req2)
-    )
-    all_manip.append(dcache_load_miss_rate)
-    branch_mispred = PerfManip(
-        name = "global.branch_mispred",
-        counters = [f"ftq.BpRight", f"ftq.BpWrong"],
-        func = lambda right, wrong: wrong / (right + wrong)
-    )
-    all_manip.append(branch_mispred)
-    load_replay_rate = PerfManip(
-        name = "global.load_replay_rate",
-        counters = [f"ftq.replayRedirect", f"rob.commitInstrLoad"],
-        func = lambda redirect, load: redirect / load
-    )
-    # all_manip.append(load_replay_rate)
-    ptw_mem_latency = PerfManip(
-        name = "global.ptw_mem_latency",
-        counters = [
-            "core.ptw.ptw.mem_count",
-            "core.ptw.ptw.mem_cycle"
-        ],
-        func = lambda count, cycle : cycle / count if count > 0 else 0
-    )
-    all_manip.append(ptw_mem_latency)
-    l2tlb_cache_l2 = PerfManip(
-        name = "global.ptw.l2hit_rate",
-        counters = [
-            "core.ptw.ptw.cache.l2_hit_first",
-            'core.ptw.ptw.cache.access_first',
-        ],
-        func = lambda hit, access : hit / access if access > 0 else 0
-    )
-    all_manip.append(l2tlb_cache_l2)
-    l2tlb_cache_pte = PerfManip(
-        name = "global.ptw.pte_hit_rate",
-        counters = [
-            "core.ptw.ptw.cache.pte_hit_first",
-            'core.ptw.ptw.cache.access_first',
-        ],
-        func = lambda hit, access : hit / access if access > 0 else 0
-    )
-    all_manip.append(l2tlb_cache_pte)
-    l2tlb_cache_pte_pre = PerfManip(
-        name = "global.ptw.pte_hit_pre_rate",
-        counters = [
-            "core.ptw.ptw.cache.pte_hit_pre_first",
-            'core.ptw.ptw.cache.pte_hit_first',
-        ],
-        func = lambda pre, hit : pre / hit if hit > 0 else 0
-    )
-    all_manip.append(l2tlb_cache_pte_pre)
-    l2tlb_cache_pre_hit = PerfManip(
-        name = "global.ptw.pre_pte_hit_rate",
-        counters = [
-            "core.ptw.ptw.cache.pre_pte_hit_first",
-            'core.ptw.ptw.cache.pre_access_first',
-        ],
-        func = lambda hit, access : hit / access if access > 0 else 0
-    )
-    all_manip.append(l2tlb_cache_pre_hit)
-    l3cache_mpki_load = PerfManip(
-        name = "global.l3cache_mpki_load",
-        counters = [
-            "L3_bank_0_A_channel_AcquireBlock_fire", "L3_bank_0_A_channel_Get_fire",
-            "L3_bank_1_A_channel_AcquireBlock_fire", "L3_bank_1_A_channel_Get_fire",
-            "L3_bank_2_A_channel_AcquireBlock_fire", "L3_bank_2_A_channel_Get_fire",
-            "L3_bank_3_A_channel_AcquireBlock_fire", "L3_bank_3_A_channel_Get_fire",
-            "commitInstr"
-        ],
-        func = lambda fire1, fire2, fire3, fire4, fire5, fire6, fire7, fire8, instr :
-            1000 * (fire1 + fire2 + fire3 + fire4 + fire5 + fire6 + fire7 + fire8) / instr
-    )
-    all_manip.append(l3cache_mpki_load)
-    all_manip += get_wpu_manip()
+    # ipc = PerfManip(
+    #     name = "global.IPC",
+    #     counters = [f"clock_cycle",
+    #     f"commitInstr"],
+    #     func = lambda cycle, instr: instr * 1.0 / cycle
+    # )
+    # all_manip.append(ipc)
+    # branch_mpki = PerfManip(
+    #     name = "global.branch_prediction_mpki",
+    #     counters = [f"ftq.BpWrong",
+    #     f"commitInstr"],
+    #     func = lambda wrong, instr: 1000 * wrong / instr
+    # )
+    # all_manip.append(branch_mpki)
+    # load_latency = PerfManip(
+    #     name = "global.load_instr_latency",
+    #     counters = ["rob.load_latency_execute", "rob.load_instr_cnt"],
+    #     func = lambda latency, count: latency / count
+    # )
+    # all_manip.append(load_latency)
+    # fma_latency = PerfManip(
+    #     name = "global.fma_instr_latency",
+    #     counters = ["rob.fmac_latency_execute_fma", "rob.fmac_instr_cnt_fma"],
+    #     func = lambda latency, count: latency / count if count != 0 else 0
+    # )
+    # all_manip.append(fma_latency)
+    # icache_miss_rate = PerfManip(
+    #     name = "global.icache_miss_rate",
+    #     counters = [f"frontend.ifu.icache.req", f"frontend.ifu.icache.miss"],
+    #     func = lambda req, miss: miss / req
+    # )
+    # # all_manip.append(icache_miss_rate)
+    # dtlb_miss_rate = PerfManip(
+    #     name = "global.dtlb_miss_rate",
+    #     counters = [f"memBlock.TLB.first_access0", f"memBlock.TLB.first_miss0",
+    #         f"memBlock.TLB_1.first_access0", f"memBlock.TLB_1.first_miss0",
+    #         f"memBlock.TLB_2.first_access0", f"memBlock.TLB_2.first_miss0",
+    #         f"memBlock.TLB_3.first_access0", f"memBlock.TLB_3.first_miss0"],
+    #     func = lambda req1, miss1, req2, miss2, req3, miss3, req4, miss4: (miss1 + miss2 + miss3 + miss4) / (req1 + req2 + req3 + req4) if ((req1 + req2 + req3 + req4) > 0) else 0
+    # )
+    # all_manip.append(dtlb_miss_rate)
+    # dtlb_sa_percent = PerfManip(
+    #     name = "global.dtlb_sa_hit_percent",
+    #     counters = [f"memBlock.TLB.tlb_normal_sa.hit", f"memBlock.TLB.tlb_super_fa.hit",
+    #                f"memBlock.TLB_1.tlb_normal_sa.hit", f"memBlock.TLB_1.tlb_super_fa.hit",
+    #                f"memBlock.TLB_2.tlb_normal_sa.hit", f"memBlock.TLB_2.tlb_super_fa.hit",
+    #                f"memBlock.TLB_3.tlb_normal_sa.hit", f"memBlock.TLB_3.tlb_super_fa.hit"],
+    #     func = lambda sa0, fa0, sa1, fa1, sa2, fa2, sa3, fa3: (sa0 + sa1 + sa2 + sa3) / (sa0 + sa1 + sa2 + sa3 + fa0 + fa1 + fa2 + fa3) if ((sa0 + sa1 + sa2 + sa3 + fa0 + fa1 + fa2 + fa3) > 0) else 0
+    # )
+    # all_manip.append(dtlb_sa_percent)
+    # ldtlb_miss_rate = PerfManip(
+    #     name = "global.ldtlb_miss_rate",
+    #     # counters = [f"memBlock.TLB.first_access0", f"memBlock.TLB.first_miss0",
+    #     #     f"memBlock.TLB_1.first_access0", f"memBlock.TLB_1.first_miss0"],
+    #     # func = lambda req1, miss1, req2, miss2: (miss1 + miss2) / (req1 + req2) if ((req1 + req2) > 0) else 0
+    #     counters = [f"memBlock.dtlb_ld_tlb_ld.first_access0", f"memBlock.dtlb_ld_tlb_ld.first_miss0"],
+    #     func = lambda req, miss: 1.0*miss / req if (req > 0) else 0
+    # )
+    # all_manip.append(ldtlb_miss_rate)
+    # ldtlb_sa_percent = PerfManip(
+    #     name = "global.ldtlb_sa_hit_percent",
+    #     counters = [f"memBlock.TLB.tlb_normal_sa.hit", f"memBlock.TLB.tlb_super_fa.hit",
+    #                f"memBlock.TLB_1.tlb_normal_sa.hit", f"memBlock.TLB_1.tlb_super_fa.hit"],
+    #     func = lambda sa0, fa0, sa1, fa1: (sa0 + sa1) / (sa0 + sa1 + fa0 + fa1) if ((sa0 + sa1 + fa0 + fa1) > 0) else 0
+    # )
+    # all_manip.append(ldtlb_sa_percent)
+    # sttlb_miss_rate = PerfManip(
+    #     name = "global.sttlb_miss_rate",
+    #     # counters = [f"memBlock.TLB_2.first_access0", f"memBlock.TLB_2.first_miss0",
+    #     #     f"memBlock.TLB_2.first_access0", f"memBlock.TLB_2.first_miss0"],
+    #     # func = lambda req1, miss1, req2, miss2: (miss1 + miss2) / (req1 + req2) if ((req1 + req2) > 0) else 0
+    #     counters = [f"memBlock.dtlb_st_tlb_st.first_access0", f"memBlock.dtlb_st_tlb_st.first_miss0"],
+    #     func = lambda req, miss: 1.0*miss / req if (req > 0) else 0
+    # )
+    # all_manip.append(sttlb_miss_rate)
+    # sttlb_sa_percent = PerfManip(
+    #     name = "global.sttlb_sa_hit_percent",
+    #     counters = [f"memBlock.TLB_2.tlb_normal_sa.hit", f"memBlock.TLB_2.tlb_super_fa.hit",
+    #                f"memBlock.TLB_3.tlb_normal_sa.hit", f"memBlock.TLB_3.tlb_super_fa.hit"],
+    #     func = lambda sa0, fa0, sa1, fa1: (sa0 + sa1) / (sa0 + sa1 + fa0 + fa1) if ((sa0 + sa1 + fa0 + fa1) > 0) else 0
+    # )
+    # all_manip.append(sttlb_sa_percent)
+    # ptw_access_latency = PerfManip(
+    #     name = "global.ptw_access_latency",
+    #     counters = [f"dtlbRepeater.inflight_cycle", f"dtlbRepeater.ptw_req_count"],
+    #     func = lambda cycle, count: cycle / count if (count > 0) else 0
+    # )
+    # all_manip.append(ptw_access_latency)
+    # dcache_load_miss_rate = PerfManip(
+    #     name = "global.dcache_load_miss_rate_first_issue",
+    #     counters = [f"LoadUnit_0.load_s2.in_fire_first_issue", f"LoadUnit_0.load_s2.dcache_miss_first_issue",
+    #         f"LoadUnit_1.load_s2.in_fire_first_issue", f"LoadUnit_1.load_s2.dcache_miss_first_issue"],
+    #     func = lambda req1, miss1, req2, miss2: (miss1 + miss2) / (req1 + req2)
+    # )
+    # all_manip.append(dcache_load_miss_rate)
+    # branch_mispred = PerfManip(
+    #     name = "global.branch_mispred",
+    #     counters = [f"ftq.BpRight", f"ftq.BpWrong"],
+    #     func = lambda right, wrong: wrong / (right + wrong)
+    # )
+    # all_manip.append(branch_mispred)
+    # load_replay_rate = PerfManip(
+    #     name = "global.load_replay_rate",
+    #     counters = [f"ftq.replayRedirect", f"rob.commitInstrLoad"],
+    #     func = lambda redirect, load: redirect / load
+    # )
+    # # all_manip.append(load_replay_rate)
+    # ptw_mem_latency = PerfManip(
+    #     name = "global.ptw_mem_latency",
+    #     counters = [
+    #         "core.ptw.ptw.mem_count",
+    #         "core.ptw.ptw.mem_cycle"
+    #     ],
+    #     func = lambda count, cycle : cycle / count if count > 0 else 0
+    # )
+    # all_manip.append(ptw_mem_latency)
+    # l2tlb_cache_l2 = PerfManip(
+    #     name = "global.ptw.l2hit_rate",
+    #     counters = [
+    #         "core.ptw.ptw.cache.l2_hit_first",
+    #         'core.ptw.ptw.cache.access_first',
+    #     ],
+    #     func = lambda hit, access : hit / access if access > 0 else 0
+    # )
+    # all_manip.append(l2tlb_cache_l2)
+    # l2tlb_cache_pte = PerfManip(
+    #     name = "global.ptw.pte_hit_rate",
+    #     counters = [
+    #         "core.ptw.ptw.cache.pte_hit_first",
+    #         'core.ptw.ptw.cache.access_first',
+    #     ],
+    #     func = lambda hit, access : hit / access if access > 0 else 0
+    # )
+    # all_manip.append(l2tlb_cache_pte)
+    # l2tlb_cache_pte_pre = PerfManip(
+    #     name = "global.ptw.pte_hit_pre_rate",
+    #     counters = [
+    #         "core.ptw.ptw.cache.pte_hit_pre_first",
+    #         'core.ptw.ptw.cache.pte_hit_first',
+    #     ],
+    #     func = lambda pre, hit : pre / hit if hit > 0 else 0
+    # )
+    # all_manip.append(l2tlb_cache_pte_pre)
+    # l2tlb_cache_pre_hit = PerfManip(
+    #     name = "global.ptw.pre_pte_hit_rate",
+    #     counters = [
+    #         "core.ptw.ptw.cache.pre_pte_hit_first",
+    #         'core.ptw.ptw.cache.pre_access_first',
+    #     ],
+    #     func = lambda hit, access : hit / access if access > 0 else 0
+    # )
+    # all_manip.append(l2tlb_cache_pre_hit)
+    # l3cache_mpki_load = PerfManip(
+    #     name = "global.l3cache_mpki_load",
+    #     counters = [
+    #         "L3_bank_0_A_channel_AcquireBlock_fire", "L3_bank_0_A_channel_Get_fire",
+    #         "L3_bank_1_A_channel_AcquireBlock_fire", "L3_bank_1_A_channel_Get_fire",
+    #         "L3_bank_2_A_channel_AcquireBlock_fire", "L3_bank_2_A_channel_Get_fire",
+    #         "L3_bank_3_A_channel_AcquireBlock_fire", "L3_bank_3_A_channel_Get_fire",
+    #         "commitInstr"
+    #     ],
+    #     func = lambda fire1, fire2, fire3, fire4, fire5, fire6, fire7, fire8, instr :
+    #         1000 * (fire1 + fire2 + fire3 + fire4 + fire5 + fire6 + fire7 + fire8) / instr
+    # )
+    # all_manip.append(l3cache_mpki_load)
+    # all_manip += get_wpu_manip()
     # all_manip += get_rs_manip()
     # all_manip += get_fu_manip()
+    all_manip += get_l2_manip()
+    
     return all_manip
 
 
@@ -649,6 +695,7 @@ def merge_perf_counters(all_perf, verbose=False):
         return pieces
     all_names = sorted(list(set().union(*list(map(lambda s: s.keys(), all_perf)))), key=extract_numbers)
     all_perf = sorted(all_perf, key=lambda x: extract_numbers(x.filename))
+    
     filenames = list(map(lambda x: x.filename, all_perf))
     # remove common prefix
     prefix_length = get_prefix_length(filenames) if len(filenames) > 1 else 0
@@ -660,16 +707,16 @@ def merge_perf_counters(all_perf, verbose=False):
     if suffix_length > 0:
         filenames = list(map(lambda name: name[:-suffix_length], filenames))
     all_sources = filenames
-
+ 
     # Yield first row as header, use header.cases as [0] to avoid conflict in pick()
     yield ["header.cases"] + all_sources
 
-    pbar = tqdm(total = len(all_names), disable = not verbose, position = 3)
-    for name in all_names:
-        if verbose:
-            pbar.display(f"Merging perf counter: {name}", 2)
-            pbar.update(1)
-        yield [name] + list(map(lambda perf: perf.get_counter(name, strict=True), all_perf))
+    # pbar = tqdm(total = len(all_names), disable = not verbose, position = 3)
+    # for name in all_names:
+    #     if verbose:
+    #         pbar.display(f"Merging perf counter: {name}", 2)
+    #         pbar.update(1)
+    #     yield [name] + list(map(lambda perf: perf.get_counter(name, strict=True), all_perf))
 
 def pick(include_names, name, include_manip = False):
     '''
