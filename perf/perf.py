@@ -7,7 +7,8 @@ import re
 from multiprocessing import Process, Queue
 from tqdm import tqdm
 import json
-
+from colorama import Fore, init
+init(autoreset=True)
 
 class PerfManip(object):
     def __init__(self, name, counters, func):
@@ -22,6 +23,9 @@ class PerfCounters(object):
     path_re = re.compile(r'(?P<spec_name>\w+((_\w+)|(_\w+\.\w+)|-\d+|))_(?P<time_point>\d+)_(?P<weight>0\.\d+)')
 
     def __init__(self, args):
+        self.filename = None
+        self.raw_counters = dict()
+        self.dump_counters = dict()
         if isinstance(args, str):
             self.file_init(args)
         else:
@@ -42,7 +46,7 @@ class PerfCounters(object):
         updated_perf = dict()
         for key in all_perf_counters:
             updated_perf[key[prefix_length:]] = all_perf_counters[key]
-        self.counters = updated_perf
+        self.raw_counters = updated_perf
         self.filename = filename
 
     def spec_init(self, spec_dir: str, spec_name: str, spec_json):
@@ -93,7 +97,7 @@ class PerfCounters(object):
             for perf_name in tmp_counters:
                 all_perf_counters[perf_name] = all_perf_counters.get(perf_name,0) + float(tmp_counters[perf_name]) * float(weight)
             total_weight += float(weight)
-        
+
         ### do noramlization
         if total_weight == 0:
             print(f"{spec_name} does not exists in {spec_dir}")
@@ -105,45 +109,56 @@ class PerfCounters(object):
         updated_perf = dict()
         for key in all_perf_counters:
             updated_perf[key[prefix_length:]] = all_perf_counters[key]
-        self.counters = updated_perf
+        self.raw_counters = updated_perf
         self.filename = spec_name
 
     def add_manip(self, all_manip):
-        if len(self.counters) == 0:
+        if len(self.raw_counters) == 0:
             return
+        
         for manip in all_manip:
-            if None in map(lambda name: self[name], manip.counters):
-                # print(list(map(lambda name: self[name], manip.counters)))
-                # print(f"Some counters for {manip.name} is not found. Please check it.")
-                continue
-            numbers = map(lambda name: int(self[name]), manip.counters)
-            try:
-                self.counters[manip.name] = str(manip.func(*numbers))
-            except:
-                pass
+            caputure_counters=dict()
+            for name in manip.counters:
+                caputure_counters[name]=0
+                for k in self.keys():
+                    if k.endswith(name):
+                        match_key = k
+                        caputure_counters[name] += int(self.raw_counters[match_key])
+                        print(f"merging value {match_key} -> {name} : {caputure_counters[name]}")
+
+            numbers = map(lambda name: int(self[name]), caputure_counters)
+            # self.raw_counters[manip.name] = str(manip.func(*numbers))
+            self.dump_counters[manip.name] = str(manip.func(*numbers))
 
     def get_counter(self, name, strict=False):
-        key = self.counters.get(name, "")
-        if strict or key != "":
-            return key
-        matched_keys = list(filter(lambda k: k.endswith(name), self.keys()))
+        matched_keys = []
+        try:
+            matched_keys = list(filter(lambda k: k.endswith(name), self.keys()))
+        except:
+            matched_keys.append(name)
+            
         if len(matched_keys) == 0:
-            return None
+            return 0
         if len(matched_keys) > 1:
-            print(f"more than one found for {name}!! Use the first one.")
-        return self.counters[matched_keys[0]]
-
+            # print(f"more than one found for {name}, merging all value")
+            total_value = sum([int(self.raw_counters[k]) for k in matched_keys])
+            return total_value
+        else:
+            return self.raw_counters[matched_keys[0]]
+    def get_dump_counters(self, name):
+        return self.dump_counters[name]
+        
     def get_counters(self):
-        return self.counters
+        return self.raw_counters
 
     def keys(self):
-        return self.counters.keys()
+        return list(self.raw_counters.keys())
 
     def __getitem__(self, index):
         return self.get_counter(index)
 
     def __iter__(self):
-        return self.counters.__iter__()
+        return self.raw_counters.__iter__()
 
 def get_rs_manip():
     all_manip = []
@@ -477,27 +492,36 @@ def get_l2_manip():
         func = lambda hit, miss: hit / (hit + miss)
     ))
     all_manip.append(PerfManip(
-        name = "l2_A_acquire_hitRate",
+        name = "l2_acquire_hitRate",
         counters = [
-            "L2_a_acquire_hit","L2_a_acquire_miss"
+            "L2_acquire_hit","L2_acquire_miss"
         ],
         func = lambda hit, miss: hit / (hit + miss)
     ))
     all_manip.append(PerfManip(
-        name = "l2_A_req_getRate",
+        name = "l2_req_getRate",
         counters = [
-            "L2_a_get_hit","L2_a_get_miss"
+            "L2_get_hit","L2_get_miss"
         ],
         func = lambda hit, miss: hit / (hit + miss)
     ))
     all_manip.append(PerfManip(
-        name = "l2_prefetchReq_nums",
+        name = "l2_prefetchReq_totalNums",
         counters = [
             "bop_send2_queue",
             "sms_send2_queue",
-            "bop_send2_queue"
+            "spp_send2_queue"
         ],
         func = lambda sms,bop,spp: sms + bop + spp
+    ))
+    all_manip.append(PerfManip(
+        name = "l2_spp_weight",
+        counters = [
+            "bop_send2_queue",
+            "sms_send2_queue",
+            "spp_send2_queue"
+        ],
+        func = lambda sms,bop,spp:  0 if (sms + bop + spp)==0 else spp / (sms + bop + spp)
     ))
     all_manip.append(PerfManip(
         name = "l2_prefetch_dead_block_nums",
@@ -507,7 +531,7 @@ def get_l2_manip():
         func = lambda x: x
     ))
     return all_manip
-    
+
 def get_all_manip():
     all_manip = []
     # ipc = PerfManip(
@@ -679,14 +703,14 @@ def get_all_manip():
     # all_manip += get_rs_manip()
     # all_manip += get_fu_manip()
     all_manip += get_l2_manip()
-    
+
     return all_manip
 
 
 def get_prefix_length(names):
     return len(os.path.commonprefix(names))
 
-def merge_perf_counters(all_perf, verbose=False):
+def merge_perf_counters(all_manip,all_perf, verbose=False):
     def extract_numbers(s):
         re_digits = re.compile(r"(\d+)")
         pieces = re_digits.split(s)
@@ -695,7 +719,7 @@ def merge_perf_counters(all_perf, verbose=False):
         return pieces
     all_names = sorted(list(set().union(*list(map(lambda s: s.keys(), all_perf)))), key=extract_numbers)
     all_perf = sorted(all_perf, key=lambda x: extract_numbers(x.filename))
-    
+
     filenames = list(map(lambda x: x.filename, all_perf))
     # remove common prefix
     prefix_length = get_prefix_length(filenames) if len(filenames) > 1 else 0
@@ -707,16 +731,17 @@ def merge_perf_counters(all_perf, verbose=False):
     if suffix_length > 0:
         filenames = list(map(lambda name: name[:-suffix_length], filenames))
     all_sources = filenames
- 
-    # Yield first row as header, use header.cases as [0] to avoid conflict in pick()
+
+    all_manip_keys = [k.name for k in all_manip]
+    
     yield ["header.cases"] + all_sources
 
-    # pbar = tqdm(total = len(all_names), disable = not verbose, position = 3)
-    # for name in all_names:
-    #     if verbose:
-    #         pbar.display(f"Merging perf counter: {name}", 2)
-    #         pbar.update(1)
-    #     yield [name] + list(map(lambda perf: perf.get_counter(name, strict=True), all_perf))
+    pbar = tqdm(total = len(all_names), disable = not verbose, position = 3)
+    for name in all_manip_keys:
+        if verbose:
+            pbar.display(f"Merging perf counter: {name}", 1)
+            pbar.update(1)
+        yield [name] + list(map(lambda perf: perf.get_dump_counters(name), all_perf))
 
 def pick(include_names, name, include_manip = False):
     '''
@@ -734,54 +759,11 @@ def pick(include_names, name, include_manip = False):
     return False
 
 def perf_work(manip, work_queue, perf_queue):
-  while not work_queue.empty():
-    item = work_queue.get()
-    try:
+    while not work_queue.empty():
+        item = work_queue.get()
         perf = PerfCounters(item)
         perf.add_manip(manip)
         perf_queue.put(perf)
-    except:
-      perf_queue.put(None)
-
-def main(pfiles, output_file, include_names, include_manip=False, verbose=False, jobs = 1, normalize_spec = None, dirs = None):
-    all_perf = []
-    all_manip = get_all_manip()
-    
-    work_queue = Queue()
-    perf_queue = Queue()
-    process_lst = []
-    if len(normalize_spec) > 0 and dirs is not None:
-        for spec_name in normalize_spec.keys():
-            work_queue.put((dirs, spec_name, normalize_spec))
-    else:
-        for filename in pfiles:
-            work_queue.put(filename)
-    files_count = work_queue.qsize()
-    pbar = tqdm(total = files_count, disable = not verbose, position = 1)
-    for i in range(0, jobs):
-        p = Process(target = perf_work, args=(all_manip, work_queue, perf_queue))
-        process_lst.append(p)
-        p.start()
-    perf_lst = []
-    while len(perf_lst) != files_count:
-      if verbose:
-        pbar.display(f"Processing files with {jobs} threads ...", 0)
-      perf = perf_queue.get()
-      perf_lst.append(perf)
-      if perf and perf.counters:
-        all_perf.append(perf)
-      elif perf:
-        pbar.write(f"{perf.filename} skipped because it is empty.")
-      pbar.update(1)
-    for p in process_lst:
-      p.join()
-
-    with open(output_file, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile)
-        for output_row in merge_perf_counters(all_perf, verbose):
-            if pick(include_names, output_row[0], include_manip):
-                csvwriter.writerow(output_row)
-    pbar.write(f"Finished processing {len(all_perf)} non-empty files.")
 
 def find_simulator_err(pfiles):
     if len(pfiles) > 1:
@@ -810,7 +792,7 @@ def find_all_in_dir(dir_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='performance counter log parser')
-    parser.add_argument('pfiles', metavar='filename', type=str, nargs='*', default=None,
+    parser.add_argument('--pfiles', metavar='filename', type=str, nargs='*', default=None,
                         help='performance counter log')
     parser.add_argument('--output', '-o', default="stats.csv", help='output file')
     parser.add_argument('--filelist', '-f', default=None, help="filelist")
@@ -855,5 +837,46 @@ if __name__ == "__main__":
             exit()
 
     print(f"output file: {args.output}")
+    all_perf = []
+    all_manip = get_all_manip()
 
-    main(args.pfiles, args.output, args.include, args.manip, args.verbose, args.jobs, normalize_spec, args.dir)
+    work_queue = Queue()
+    perf_queue = Queue()
+    process_lst = []
+    if len(normalize_spec) > 0 and args.dirs is not None:
+        for spec_name in normalize_spec.keys():
+            work_queue.put((args.dirs, spec_name, normalize_spec))
+    else:
+        for filename in args.pfiles:
+            work_queue.put(filename)
+    files_count = work_queue.qsize()
+ 
+    for i in range(0, args.jobs):
+        p = Process(target = perf_work, args=(all_manip, work_queue, perf_queue))
+        process_lst.append(p)
+        p.start()
+    pbar = tqdm(total = files_count, disable = not args.verbose, position = 1)    
+    perf_lst = []
+    while len(perf_lst) != files_count:
+      if args.verbose:
+        pbar.display(f"Processing files with {args.jobs} threads ...", 0)
+      perf = perf_queue.get()
+      perf_lst.append(perf)
+      
+      if perf and perf.raw_counters:
+        all_perf.append(perf)
+      elif perf:
+        pbar.write(f"{perf.filename} skipped because it is empty.")
+      pbar.update(1)
+      
+    for p in process_lst:
+      p.join()
+
+    with open(args.output, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile)
+        for output_row in merge_perf_counters(all_manip, all_perf, args.verbose):
+            if pick(args.include, output_row[0], args.manip):
+                csvwriter.writerow(output_row)
+    pbar.write(f"Finished processing {len(all_perf)} non-empty files.")
+
+    print("fininshed")

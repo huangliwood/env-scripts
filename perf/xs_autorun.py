@@ -14,7 +14,7 @@ import threading
 import time
 import psutil
 from multiprocessing import Process, Queue
-from colorama import Fore
+from colorama import Fore, init
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -27,7 +27,9 @@ import AutoEmailAlert
 import multiprocessing
 
 TASKS_DIR = "SPEC06_EmuTasks_10_22_2021"
-MAX_THREADS = 112 #int(multiprocessing.cpu_count()/2)
+MAX_THREADS =int(multiprocessing.cpu_count())
+RUN_THREADS = 16
+init(autoreset=True)
 def get_perf_base_path():
   if os.path.isabs(TASKS_DIR):
     return TASKS_DIR
@@ -92,19 +94,18 @@ def load_all_gcpt(gcpt_path, json_path, threads, state_filter=None, xs_path=None
 pending_proc, error_proc = [], []
 
 def get_available_threads():
-  cpu_percentages = psutil.cpu_percent(percpu=True)
+  cpu_percentages = psutil.cpu_percent(interval = 2,percpu=True)
   free_threads = [1] * (int(MAX_THREADS))
   for i, percentage in enumerate(cpu_percentages)  :
     if i < MAX_THREADS:
       coreId = i
-      if percentage < 0.4:
+      if percentage < 10:
         free_threads[coreId] = 0
 
   return free_threads
   
 def get_free_cores(free_threads):
-  sequence_len = 16
-  sequence = [0] * 16
+  sequence_len = RUN_THREADS
   start_positions = []
   i=0
   while i < len(free_threads) - sequence_len + 1:
@@ -115,8 +116,8 @@ def get_free_cores(free_threads):
       else:
           i += 1
 
-  start_positions = [math.ceil(pos / 16) * 16 for pos in start_positions]
-  free_cores = [pos // 16 for pos in start_positions]
+  start_positions = [math.ceil(pos / RUN_THREADS) * RUN_THREADS for pos in start_positions]
+  free_cores = [pos // RUN_THREADS for pos in start_positions]
 
   return free_cores
 
@@ -136,9 +137,8 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
   proc_count, finish_count = 0, 0
   free_threads = get_available_threads()
   free_cores = get_free_cores(free_threads)
-  real_maxThreads = free_threads.count(0)
-  max_pending_proc =  int(real_maxThreads / 16)
-
+  max_pending_proc =  len(free_cores)
+  can_launch = max_pending_proc
   # skip CI cores
   ci_cores = []#list(range(0, 64))# + list(range(32, 48))
   for core in list(map(lambda x: x // threads, ci_cores)):
@@ -152,34 +152,39 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
     while len(workloads) > 0 or len(pending_proc) > 0:        
       has_pending_workload = len(workloads) > 0 and len(pending_proc) >= max_pending_proc
       has_pending_proc = len(pending_proc) > 0
+      # deal when finished, update avaliable cores
       if has_pending_workload or has_pending_proc:
           finished_proc = list(filter(lambda p: p[1].poll() is not None, pending_proc))
           for workload, proc, core in finished_proc:
-            # real_maxThreads = get_available_threads()
-            # max_pending_proc = int(real_maxThreads / 16)
-            
-            print(f"{workload} has finished")
             pending_proc.remove((workload, proc, core))
-            free_cores.append(core)
+            print(Fore.GREEN+f"{workload} has finished\n")
+            if core not in free_cores:
+              free_cores.append(core)
             if proc.returncode != 0:
-              print(f"[ERROR] {workload} exits with code {proc.returncode}")
+              print(Fore.RED+f"[ERROR] {workload} exits with code {proc.returncode}")
               error_proc.append(workload)
-              continue
             finish_count += 1
+            can_launch += 1
+            if can_launch < max_pending_proc:
+              can_launch = max_pending_proc
+            
+          if timeStamp > 60:
+            free_threads = get_available_threads()
+            free_cores = get_free_cores(free_threads)
+            max_pending_proc = len(free_cores)
+            print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
+            timeStamp = 0
+          timeStamp+=1  
+            
           if len(finished_proc) == 0:
             time.sleep(1)
-      can_launch = max_pending_proc - len(pending_proc)
+      
+      if can_launch < 0 or max_pending_proc < 0:
+        continue
+
       for workload in workloads[:can_launch]:
-        if len(pending_proc) < max_pending_proc:
-          allocate_core = free_cores[0]
+        if len(free_cores) != 0:   
           numa_cmd = []
-          if threads > 1:
-            start_core = threads * allocate_core
-            end_core = threads * allocate_core + threads - 1
-            numa_node = 1 if start_core >= 64 else 0
-            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+MAX_THREADS}-{end_core+MAX_THREADS}"]
-            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core+MAX_THREADS}-{end_core+MAX_THREADS}"]
-            numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core}-{end_core}"]
           workload_path = workload.get_bin_path()
           result_path = workload.get_res_dir()
           stdout_file = workload.get_out_path()
@@ -188,15 +193,23 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
           if not os.path.exists(result_path):
             os.makedirs(result_path, exist_ok=False)
           elif not args.override:
-            # check if previous finined 
-            with open(stdout_file, 'r') as f:
-              content = f.read()
-              if "ABORT" not in content.upper() and "IPC = -nan" not in content and "Host time spent:" in content:
-                  print(f"cmd {proc_count}: {numa_cmd+base_arguments+[workload_path]} previous sim exisited ,skipping...")
-                  skip=True
-              # else :
-                  #print(f"cmd {proc_count}: {numa_cmd+base_arguments+[workload_path]} need override")
+            if os.path.exists(stderr_file) and os.path.exists(stdout_file):
+              # check if previous finined 
+              with open(stdout_file, 'r') as f:
+                content = f.read()
+                if "ABORT" not in content.upper() and "IPC = -nan" not in content and "Host time spent:" in content:
+                    print(Fore.RED + f"cmd {proc_count}: previous sim not finished ,resiming...")
+                    skip=False
+                # else :
+                    #print(f"cmd {proc_count}: {numa_cmd+base_arguments+[workload_path]} need override")
           if not skip:
+            allocate_core = free_cores[-1]
+            if threads > 1:
+              start_core = threads * allocate_core
+              end_core = threads * allocate_core + threads - 1
+              numa_node = 1 if start_core >= 64 else 0
+              numa_cmd = ["numactl", "-m", str(numa_node), "-C", f"{start_core}-{end_core}"]
+            
             with open(stdout_file, "w") as stdout, open(stderr_file, "w") as stderr:
               random_seed = random.randint(0, 9999)
               run_cmd = numa_cmd + base_arguments + [workload_path] + ["-s", f"{random_seed}"]
@@ -204,19 +217,11 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
               print(f"cmd {proc_count}: {cmd_str}")
               proc = subprocess.Popen(run_cmd, stdout=stdout, stderr=stderr, preexec_fn=os.setsid)
               pending_proc.append((workload, proc, allocate_core))
-              free_cores = free_cores[1:]
+              free_cores = free_cores[:-1]
+              
           proc_count += 1
       workloads = workloads[can_launch:]
-      
-      # timeStamp=timeStamp + 1
-      # if timeStamp > 60:
-      #   timeStamp = 0
-      #   real_maxThreads = get_available_threads()
-      #   max_pending_proc = int(real_maxThreads / 16)
-      #   free_cores = list(range(max_pending_proc))
-      #   print("Free cores:", free_cores)
-      #   if len(free_cores) == 0:
-      #     print("has no free core,waiting...")
+      can_launch=0
           
   except KeyboardInterrupt:
     print("Interrupted. Exiting all programs ...")
@@ -265,7 +270,7 @@ def get_all_manip():
     return all_manip
 
 def get_total_inst(benchspec, spec_version, isa):
-  base_dir = "/nfs/share/checkpoints_profiles"
+  base_dir = "/mhPool/bigData/xs-simpoints"
   if spec_version == 2006:
     if isa == "rv64gc_old":
       base_path = os.path.join(base_dir, "spec06_rv64gc_o2_50m/profiling")
@@ -433,9 +438,9 @@ def xs_debug(all_gcpt):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="autorun script for xs")
   parser.add_argument('--gcpt_path', metavar='gcpt_path', type=str,
-                      help='path to gcpt checkpoints',default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt")
+                      help='path to gcpt checkpoints',default="/mhPool/bigData/xs-simpoints/spec06_rv64gcb_o2_20m/take_cpt")
   parser.add_argument('--json_path', metavar='json_path', type=str,
-                      help='path to gcpt json',default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_coverage0.3_test.json")
+                      help='path to gcpt json',default="/mhPool/bigData/xs-simpoints/spec06_rv64gcb_o2_20m/json/simpoint_coverage0.3_test.json")
   parser.add_argument('--xs',type=str, help='path to xs')
   parser.add_argument('--emu', help='path to emu',default=f"./build/emu")
   parser.add_argument('--cmdline-opt', default="nanhu", type=str, help='xs emu command line options, nanhu or kunminghu')
@@ -463,6 +468,8 @@ if __name__ == "__main__":
   
   if args.maxthreads != 0:
     MAX_THREADS = args.maxthreads
+  if args.threads != RUN_THREADS:
+    RUN_THREADS = args.threads
   
   if args.pf:
     args.json_path=os.path.abspath("config/prefetch_simpoint_coverage0.3_test.json")
