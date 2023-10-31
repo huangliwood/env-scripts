@@ -99,7 +99,7 @@ def get_available_threads():
   for i, percentage in enumerate(cpu_percentages)  :
     if i < MAX_THREADS:
       coreId = i
-      if percentage < 10:
+      if percentage < 15:
         free_threads[coreId] = 0
 
   return free_threads
@@ -110,7 +110,7 @@ def get_free_cores(free_threads):
   i=0
   while i < len(free_threads) - sequence_len + 1:
       curr_slice = free_threads[i:i+sequence_len]
-      if  curr_slice.count(1) < 4:
+      if  curr_slice.count(1) == 0:
           start_positions.append(i)
           i += sequence_len  
       else:
@@ -168,7 +168,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
             if can_launch < max_pending_proc:
               can_launch = max_pending_proc
             
-          if timeStamp > 60:
+          if timeStamp > random.uniform(60,70):
             free_threads = get_available_threads()
             free_cores = get_free_cores(free_threads)
             max_pending_proc = len(free_cores)
@@ -217,7 +217,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
               print(f"cmd {proc_count}: {cmd_str}")
               proc = subprocess.Popen(run_cmd, stdout=stdout, stderr=stderr, preexec_fn=os.setsid)
               pending_proc.append((workload, proc, allocate_core))
-              free_cores = free_cores[:-1]
+              free_cores = free_cores[:-2]
               
           proc_count += 1
       workloads = workloads[can_launch:]
