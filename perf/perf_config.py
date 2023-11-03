@@ -1,5 +1,11 @@
 #! /usr/bin/env python3
 
+"""
+    Parameter ratio indicators are defined classes, including 
+    the name of the performance parameter, 
+    the performance counter to be probed, 
+    and the lamda expression to be calculated
+"""
 class PerfManip(object):
     def __init__(self, name, counters, func = lambda x : x):
         self.name = name
@@ -411,6 +417,7 @@ def get_prefetch_manip():
         ],
         func = lambda x,y1,y2,y3 : x/(y1+y2+y3+1)
     ))
+    return all_manip
 
 def get_all_manip(args):
     all_manip = []
@@ -428,5 +435,7 @@ def get_all_manip(args):
         all_manip += get_prefetch_manip()
     else:    
         all_manip += get_l2_manip()
+        all_manip += get_prefetch_manip()
+        
     
     return all_manip

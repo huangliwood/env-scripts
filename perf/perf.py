@@ -6,29 +6,37 @@ import os
 import random
 import re
 from multiprocessing import Process, Queue
+import sys
+import time
 import pandas as pd
 from tqdm import tqdm
 import json
 from colorama import Fore, init
 init(autoreset=True)
 from perf_config import get_all_manip
-
+import concurrent.futures
+from concurrent.futures import as_completed
 class PerfCounters(object):
     perf_re = re.compile(r'.*\[PERF \]\[time=\s+\d+\] (([a-zA-Z0-9_]+\.)+[a-zA-Z0-9_]+): ((\w| |\')+),\s+(\d+)$')
     path_re = re.compile(r'(?P<spec_name>\w+((_\w+)|(_\w+\.\w+)|-\d+|))_(?P<time_point>\d+)_(?P<weight>0\.\d+)')
 
-    def __init__(self, args):
-        self.filename = None
+    def __init__(self, arg1="", arg2=False):
+        self.filename = "unkown"
         self.flag_id = "unkown"
+        self.spec_name = "unkown"
+        self.point = "0"
+        self.spec_weight = 0
         self.raw_counters = dict()
         self.dump_counters = dict()
-        if isinstance(args, str):
+        if isinstance(arg1,str) and isinstance(arg2,bool):
+            self.file_init(arg1,arg2)
+        elif isinstance(arg1, str):
             self.file_init(args)
         else:
-            (falg_id,spec_dir, spec_name, spec_json) = args
+            (falg_id, spec_dir, spec_name, spec_json) = arg1
             self.spec_init(falg_id, spec_dir, spec_name, spec_json)
 
-    def file_init(self, filename: str):
+    def file_init(self, filename: str, init_spec: bool = False):
         all_perf_counters = dict()
         with open(filename) as f:
             for line in f:
@@ -43,7 +51,16 @@ class PerfCounters(object):
         for key in all_perf_counters:
             updated_perf[key[prefix_length:]] = all_perf_counters[key]
         self.raw_counters = updated_perf
-        self.filename = filename
+        if init_spec:
+            subStr = filename.rsplit('/',2)[-2]
+            subStr = subStr.split('_')
+            name = "_".join(subStr[:-2])
+            point = subStr[-2]
+            weight = float(subStr[-1])
+            self.flag_id = filename.rsplit('/',3)[-3]
+            self.spec_name = name
+            self.point = point
+            self.spec_weight = weight
 
     def spec_init(self,flag_id: str, spec_dir: str, spec_name: str, spec_json):
         """init PerfCounters in SPEC result directory
@@ -52,6 +69,8 @@ class PerfCounters(object):
             spec_dir (str): SPEC result parent directory
             spec_name (str): spec_name that you need
         """
+        self.filename = spec_name
+        self.flag_id = flag_id
         all_perf_counters = dict()
         total_weight = 0
         for point in spec_json[spec_name]:
@@ -59,8 +78,8 @@ class PerfCounters(object):
             dir_name = "_".join([spec_name, point, weight])
             abs_dir = os.path.join(spec_dir, dir_name)
             if not os.path.exists(abs_dir):
-                print(f"{abs_dir}路径不存在")
-                return
+                print(Fore.RED+f"{weight} {abs_dir}路径不存在")
+                exit(1)
         ### 如果没有指定Json，只有spec_name，则按照这种方式处理
         # for sub_dir in os.listdir(spec_dir):
         #     re_match = self.path_re.match(sub_dir)
@@ -69,7 +88,8 @@ class PerfCounters(object):
         #     if test_name != spec_name:
         #         continue
         #     abs_dir = os.path.join(spec_dir, sub_dir)
-            tmp_counters = dict()
+        tmp_counters = dict()
+        if os.path.exists(abs_dir):
             # check
             check_file = os.path.join(abs_dir, "simulator_out.txt")
             flag = False
@@ -78,8 +98,10 @@ class PerfCounters(object):
                     if "EXCEEDING CYCLE/INSTR LIMIT" in line or "GOOD TRAP" in line:
                         flag = True
             if not flag:
-                print(os.path.join(abs_dir),"spec 测试失败，请查看结果")
+                print(Fore.RED + f"{os.path.join(abs_dir)},warning : spec 测试失败，请查看结果")
+                assert("error")
             filename = os.path.join(abs_dir, "simulator_err.txt")
+            
             with open(filename) as f:
                 for line in f:
                     perf_match = self.perf_re.match(line.replace("/", "_"))
@@ -89,15 +111,18 @@ class PerfCounters(object):
                         perf_name = perf_name.replace(" ", "_").replace("'", "")
                         ### warmup result will be overwritten
                         tmp_counters[perf_name] = perf_value
+                        
             ### get the weight accumulation
             for perf_name in tmp_counters:
                 all_perf_counters[perf_name] = all_perf_counters.get(perf_name,0) + float(tmp_counters[perf_name]) * float(weight)
             total_weight += float(weight)
-
+        # else:
+        #     print(Fore.RED+f"non existed log{filename}")
+        #     all_perf_counters[perf_name] = all_perf_counters.get(perf_name,0)
+        #     tmp_counters[perf_name] = 0                       
         ### do noramlization
-        if total_weight == 0:
-            print(f"{spec_name} does not exists in {spec_dir}")
-            exit()
+        # if total_weight == 0:
+        #     exit()
         for perf_name in tmp_counters:
             all_perf_counters[perf_name] = all_perf_counters[perf_name] / float(total_weight)
 
@@ -106,8 +131,6 @@ class PerfCounters(object):
         for key in all_perf_counters:
             updated_perf[key[prefix_length:]] = all_perf_counters[key]
         self.raw_counters = updated_perf
-        self.filename = spec_name
-        self.flag_id =flag_id
 
     def add_manip(self, all_manip):
         if len(self.raw_counters) == 0:
@@ -121,7 +144,7 @@ class PerfCounters(object):
                     if k.endswith(name):
                         match_key = k
                         caputure_counters[name] += int(self.raw_counters[match_key])
-                        print(f"merging value {match_key} -> {name} : {caputure_counters[name]}")
+                        # print(f"{self.filename}: merging value {match_key} -> {name} : {caputure_counters[name]}")
 
             numbers = map(lambda name: int(self[name]), caputure_counters)
             # self.raw_counters[manip.name] = str(manip.func(*numbers))
@@ -157,6 +180,13 @@ class PerfCounters(object):
     def __iter__(self):
         return self.raw_counters.__iter__()
 
+class spec_PerfCounters:
+        def __init__(self, args):
+            self.test_name = "unkown"
+            self.spec_namet = "unkown"
+            self.slice_counters = list()
+            self.dump_counters = dict()
+
 def get_prefix_length(names):
     return len(os.path.commonprefix(names))
 
@@ -183,14 +213,15 @@ def merge_perf_counters(all_manip,all_perf, verbose=False):
     all_sources = filenames
 
     all_manip_keys = [k.name for k in all_manip]
-    
-    yield ["trace","prefetcher"] + list(all_perf[0].dump_counters.keys())
 
     pbar = tqdm(total = len(all_names), disable = not verbose, position = 3)
 
-    
+    yield ["trace","flag_id","weight"] + list(all_perf[0].dump_counters.keys())
     for dumpP in all_perf:
-        yield [dumpP.filename,dumpP.flag_id] + list(dumpP.dump_counters.values())
+        if dumpP.spec_name != "unkown":
+             yield [dumpP.spec_name,dumpP.flag_id,dumpP.spec_weight] + list(dumpP.dump_counters.values())
+        elif dumpP.filename != "unkown":     
+            yield [dumpP.filename,dumpP.flag_id,dumpP.spec_weight] + list(dumpP.dump_counters.values())
 
 def pick(include_names, name, include_manip = False):
     '''
@@ -205,14 +236,7 @@ def pick(include_names, name, include_manip = False):
     for r in include_names:
         if r.search(name) != None:
             return True
-    return False
-
-def perf_work(manip, work_queue, perf_queue):
-    while not work_queue.empty():
-        item = work_queue.get()
-        perf = PerfCounters(item)
-        perf.add_manip(manip)
-        perf_queue.put(perf)
+    return False     
 
 def find_simulator_err(base_path):
     all_files = []
@@ -287,57 +311,100 @@ if __name__ == "__main__":
     print(f"output file: {args.output}")
     all_perf = []
     all_manip = get_all_manip(args)
-
-    work_queue = Queue()
-    perf_queue = Queue()
     process_lst = []
-    
-    if args.all:
-        root_dir = args.dir
-        data_dirList = [d for d in os.listdir(args.dir) if os.path.isdir(os.path.join(args.dir, d))]
-        data_dirList = list(map(lambda x:os.path.join(args.dir, x),data_dirList))
-        for batch_dir in data_dirList:
-            batch_name = os.path.basename(batch_dir)
-            pfiles += find_simulator_err(str(batch_dir))
-            pfiles = list(filter(lambda k: os.path.basename(k) in batch_name, normalize_spec.keys()))
-        
-            if len(normalize_spec) > 0 and batch_dir is not None:
-                for spec_name in normalize_spec.keys():
-                    work_queue.put((batch_name,batch_dir, spec_name, normalize_spec))
+
+    def process_file(file, all_manip):
+        try:
+            perf = PerfCounters(str(file),True)
+            perf.add_manip(all_manip)
+            if perf and perf.raw_counters:
+                return perf
             else:
-                for filename in pfiles:
-                    work_queue.put(filename)
-    
+                print(f"{file} skipped because it is empty.")
+                return None
+        except Exception as e:
+            print(f"Error processing {file}: {str(e)}")
+            return None
+    work_queue = Queue()
+    perf_queue = Queue()    
+    if args.all:
+        if args.pf:
+            root_dir = args.dir
+            pfiles += find_simulator_err(str(root_dir))
+        else:
+            root_dir = args.dir
+            data_dirList = [d for d in os.listdir(args.dir) if os.path.isdir(os.path.join(args.dir, d))]
+            data_dirList = list(map(lambda x:os.path.join(args.dir, x),data_dirList))
+            pfiles_dict = {}
+            for batch_dir in data_dirList:
+                batch_name = os.path.basename(batch_dir)
+                pfiles_dict['path'] = find_simulator_err(str(batch_dir))
+                    
+                pfiles += find_simulator_err(str(batch_dir))
+                # pfiles = list(filter(lambda k: os.path.basename(k) in batch_name, normalize_spec.keys())) #todo: hasebug
+    for f in pfiles:
+        work_queue.put(f)
     files_count = work_queue.qsize()
- 
+
+    def perf_work(manip, work_queue, perf_queue):
+        while not work_queue.empty():
+            try:
+                item = work_queue.get()
+                perf = PerfCounters(item,True)
+                perf.add_manip(manip)
+                perf_queue.put(perf)             
+            except Exception as e:
+                print(f"Error processing {item}: {str(e)}")
+                sys.exit(1)  # 自动退出子进程
+                
     for i in range(0, args.jobs):
         p = Process(target = perf_work, args=(all_manip, work_queue, perf_queue))
         process_lst.append(p)
         p.start()
-    pbar = tqdm(total = files_count, disable = not args.verbose, position = 1)    
-    perf_lst = []
-    
-    while len(perf_lst) != files_count:
-      if args.verbose:
-        pbar.display(f"Processing files with {args.jobs} threads ...", 0)
-      perf = perf_queue.get()
-      perf_lst.append(perf)
-      
-      if perf and perf.raw_counters:
+
+    pbar = tqdm(total = files_count, disable = not args.verbose, position = 1)
+    while len(all_perf) < files_count:
+        if args.verbose:
+            pbar.display(f"Processing files with {args.jobs} threads ...", 0)
+        
+        perf = perf_queue.get()
         all_perf.append(perf)
-      elif perf:
-        pbar.write(f"{perf.filename} skipped because it is empty.")
-      pbar.update(1)
+        
+        if perf:
+            all_perf.append(perf)
+        elif perf:
+            pbar.write(f"{perf.filename} skipped because it is empty.")
+        pbar.update(1)
       
-    for p in process_lst:
-      p.join()
-    
+    # for p in process_lst:
+    #   p.join()                   
+    # multi threads process 
+    # with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as executor:
+    #     # future_to_perf = {executor.submit(process_file, file_path, all_manip):file_path for file_path in pfiles}
+    #     future_to_perf = {}
+    #     for f in pfiles:
+    #         future_to_perf[executor.submit(process_file ,f, all_manip)] = f
+    #     # for spec_name in normalize_spec.keys():
+    #     #     future_to_perf[executor.submit(process_file, all_manip)] =     
+    #     pbar = tqdm(total=139, disable=not args.verbose, position=1)
+        
+    #     for future in as_completed(future_to_perf):
+    #         filename = future_to_perf[future]
+    #         perf = future.result()
+    #         if perf:
+    #             all_perf.append(perf)
+    #         elif perf and perf.raw_counters:
+    #             all_perf.append(perf)
+    #         pbar.write(f"{filename} added")  
+            
+    #         pbar.update(0.5)
+                    
     data = list(merge_perf_counters(all_manip, all_perf, args.verbose))
     df = pd.DataFrame(data[1:], columns=data[0])
     excel_path = args.output
     root_name = os.path.basename(args.dir)
     if os.path.exists(excel_path):
-        with pd.ExcelFile(excel_path) as xls:
+        with pd.ExcelFile(excel_path,engine="openpyxl") as xls:
             sheets = xls.sheet_names
         original_name = os.path.basename(excel_path)
         counter = random.randint(0, 9999)
