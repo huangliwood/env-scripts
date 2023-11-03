@@ -25,9 +25,11 @@ from gcpt_run_time_eval import *
 from gcpt import GCPT
 import AutoEmailAlert
 import multiprocessing
+from perf_config import PerfManip
+
 
 TASKS_DIR = "SPEC06_EmuTasks_10_22_2021"
-MAX_THREADS =int(multiprocessing.cpu_count())
+MAX_THREADS = int(multiprocessing.cpu_count())/2
 RUN_THREADS = 16
 init(autoreset=True)
 def get_perf_base_path():
@@ -99,7 +101,7 @@ def get_available_threads():
   for i, percentage in enumerate(cpu_percentages)  :
     if i < MAX_THREADS:
       coreId = i
-      if percentage < 15:
+      if percentage < 20:
         free_threads[coreId] = 0
 
   return free_threads
@@ -167,10 +169,10 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
             can_launch += 1
             if can_launch < max_pending_proc:
               can_launch = max_pending_proc
-            
-          if timeStamp > random.uniform(60,70):
-            free_threads = get_available_threads()
-            free_cores = get_free_cores(free_threads)
+              
+          free_threads = get_available_threads()
+          free_cores = get_free_cores(free_threads)  
+          if timeStamp > random.uniform(180,200):
             max_pending_proc = len(free_cores)
             print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
             timeStamp = 0
@@ -242,13 +244,13 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
 
 def get_all_manip():
     all_manip = []
-    ipc = perf.PerfManip(
+    ipc = PerfManip(
         name = "IPC",
         counters = [f"clock_cycle", f"commitInstr"],
         func = lambda cycle, instr: instr * 1.0 / cycle
     )
     all_manip.append(ipc)
-    l3cache_mpki_load = perf.PerfManip(
+    l3cache_mpki_load = PerfManip(
       name = "global.l3cache_mpki_load",
       counters = [
           "L3_bank_0_A_channel_AcquireBlock_fire", "L3_bank_0_A_channel_Get_fire",
@@ -261,7 +263,7 @@ def get_all_manip():
           1000 * (fire1 + fire2 + fire3 + fire4 + fire5 + fire6 + fire7 + fire8) / instr
     )
     all_manip.append(l3cache_mpki_load)
-    branch_mpki = perf.PerfManip(
+    branch_mpki = PerfManip(
       name = "global.branch_prediction_mpki",
       counters = ["ftq.BpWrong", "commitInstr"],
       func = lambda wrong, instr: 1000 * wrong / instr
@@ -270,7 +272,7 @@ def get_all_manip():
     return all_manip
 
 def get_total_inst(benchspec, spec_version, isa):
-  base_dir = "/mhPool/bigData/xs-simpoints"
+  base_dir = "/nfs/share/checkpoints_profiles"
   if spec_version == 2006:
     if isa == "rv64gc_old":
       base_path = os.path.join(base_dir, "spec06_rv64gc_o2_50m/profiling")
@@ -330,8 +332,8 @@ def xs_report_ipc(xs_path, gcpt_queue, result_queue):
     counters = perf.PerfCounters(perf_path)
     counters.add_manip(get_all_manip())
     # when the spec has not finished, IPC may be None
-    if counters["IPC"] is not None:
-      result_queue.put([gcpt.benchspec, [float(gcpt.weight), float(counters["IPC"])]])
+    if counters.dump_counters["IPC"] is not None:
+      result_queue.put([gcpt.benchspec, [float(gcpt.weight), float(counters.dump_counters["IPC"])]])
     else:
       print("IPC not found in", gcpt.benchspec, gcpt.point, gcpt.weight)
 
@@ -438,9 +440,9 @@ def xs_debug(all_gcpt):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="autorun script for xs")
   parser.add_argument('--gcpt_path', metavar='gcpt_path', type=str,
-                      help='path to gcpt checkpoints',default="/mhPool/bigData/xs-simpoints/spec06_rv64gcb_o2_20m/take_cpt")
+                      help='path to gcpt checkpoints',default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt")
   parser.add_argument('--json_path', metavar='json_path', type=str,
-                      help='path to gcpt json',default="/mhPool/bigData/xs-simpoints/spec06_rv64gcb_o2_20m/json/simpoint_coverage0.3_test.json")
+                      help='path to gcpt json',default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_coverage0.3_test.json")
   parser.add_argument('--xs',type=str, help='path to xs')
   parser.add_argument('--emu', help='path to emu',default=f"./build/emu")
   parser.add_argument('--cmdline-opt', default="nanhu", type=str, help='xs emu command line options, nanhu or kunminghu')

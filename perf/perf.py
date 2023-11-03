@@ -165,7 +165,7 @@ class PerfCounters(object):
                     else:
                         caputure_counters[manip.name] = -1.00
                     numbers = [ v for v in caputure_counters.values()]
-                    self.dump_counters[manip.name] = str(manip.func(*numbers)) # numbers are done as parameters passing into func(...)
+                    self.dump_counters[manip.name] = str(manip.func(*numbers))# numbers are done as parameters passing into func(...)
                 # print(manip.name,caputure_counters[manip.name],self.dump_counters[manip.name])
             else:
                 if len(self.raw_counters) == 0:
@@ -179,7 +179,7 @@ class PerfCounters(object):
                             # print(f"{self.filename}: merging value {match_key} -> {name} : {caputure_counters[name]}")
 
                     numbers = map(lambda name: int(self[name]), caputure_counters)
-                self.dump_counters[manip.name] = str(manip.func(*numbers))
+                self.dump_counters[manip.name] = str("{:.6f}".format(manip.func(*numbers)))
 
     def get_counter(self, name, strict=False):
         matched_keys = []

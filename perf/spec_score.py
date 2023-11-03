@@ -175,10 +175,11 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
   dir = os.path.abspath(args.dir)
   if args.pf:
     name = os.path.basename(args.dir) + "_pf"
+    excel_path =f"{os.path.dirname(dir)}/result_pf.xlsx"
   else:
     name = os.path.basename(args.dir)
-  excel_path =f"{os.path.dirname(dir)}/result.xlsx"
-  print(f"save data to {os.path.dirname(dir),f'result.xlsx'} sheet:{name}")
+    excel_path =f"{os.path.dirname(dir)}/result.xlsx"
+  print(f"save data to {excel_path} sheet:{name}")
   
   df = pd.DataFrame(data, columns=['BenchSpec', f'{name}@2GHZ', f'{name}@1GHz'])
   if os.path.exists(excel_path):
@@ -193,7 +194,7 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
     with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
         df.to_excel(writer, sheet_name=name, index=False)
   else:
-    with pd.ExcelWriter(f"{os.path.dirname(dir)}/result.xlsx", engine='openpyxl') as writer:
+    with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
           df.to_excel(writer, sheet_name=name, index=False)
   print()
 
