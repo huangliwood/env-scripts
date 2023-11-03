@@ -27,7 +27,6 @@ import AutoEmailAlert
 import multiprocessing
 from perf_config import PerfManip
 
-
 TASKS_DIR = "SPEC06_EmuTasks_10_22_2021"
 MAX_THREADS = int(multiprocessing.cpu_count())/2
 RUN_THREADS = 16

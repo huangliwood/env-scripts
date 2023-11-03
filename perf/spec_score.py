@@ -179,6 +179,7 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
   else:
     name = os.path.basename(args.dir)
     excel_path =f"{os.path.dirname(dir)}/result.xlsx"
+  
   print(f"save data to {excel_path} sheet:{name}")
   
   df = pd.DataFrame(data, columns=['BenchSpec', f'{name}@2GHZ', f'{name}@1GHz'])
