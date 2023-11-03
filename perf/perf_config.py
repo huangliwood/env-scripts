@@ -7,10 +7,16 @@
     and the lamda expression to be calculated
 """
 class PerfManip(object):
-    def __init__(self, name, counters, func = lambda x : x):
+    def __init__(self, name, counters = None, func = None, get_base = False, pattern = "", get_bool= False):
         self.name = name
         self.counters = counters
-        self.func = func
+        if func is None and len(counters) == 1:
+            self.func = lambda x:x
+        else:
+            self.func = func
+        self.get_base = get_base
+        self.pattern = pattern
+        self.get_bool = get_bool
     def __str__(self):
             return f"{self.name}: Counters: {self.counters}"
         
@@ -335,6 +341,44 @@ def get_wpu_manip():
     return all_manip
 
 
+def get_base_manip():
+    all_manip = []
+    all_manip.append(PerfManip(
+        name = "IPC",
+        get_base=True,
+        counters = [
+            "IPC"
+        ]
+    ))
+    all_manip.append(PerfManip(
+        name = "instrCnt",
+        get_base=True,
+        counters = [
+            "instrCnt"
+        ]
+    ))
+    all_manip.append(PerfManip(
+        name = "cycleCnt",
+        get_base=True,
+        counters = [
+            "cycleCnt"
+        ]
+    ))
+    all_manip.append(PerfManip(
+        name = "STATE",
+        get_base=True,
+        get_bool=True,
+        pattern="EXCEEDING CYCLE/INSTR LIMIT",
+        func= lambda x : "finished" if x is True else "failed"
+    ))
+    all_manip.append(PerfManip(
+        name = "simTime_hour",
+        get_base=True,
+        pattern="Host time spent: (\d+(,\d+)*)ms",
+        func= lambda x : f"{x/(3600000):1f}h"
+    ))
+    return all_manip
+
 def get_l2_manip():
     all_manip = []
     # Flip rate
@@ -343,14 +387,14 @@ def get_l2_manip():
         counters = [
             "L2_acquire_hit","L2_acquire_miss"
         ],
-        func = lambda hit, miss: hit / (hit + miss)
+        func = lambda hit, miss: hit / (hit + miss + 1)
     ))
     all_manip.append(PerfManip( #instr
         name = "l2_req_getRate",
         counters = [
             "L2_get_hit","L2_get_miss"
         ],
-        func = lambda hit, miss: hit / (hit + miss)
+        func = lambda hit, miss: hit / (hit + miss + 1)
     ))
     all_manip.append(PerfManip(
         name = "l2_mshr_TaskHint_proportion",
@@ -364,7 +408,7 @@ def get_l2_manip():
         counters = [
             "L2_a_req_hit","L2_a_req_miss"
         ],
-        func = lambda hit, miss: hit / (hit + miss)
+        func = lambda hit, miss: hit / (hit + miss + 1)
     ))
     return all_manip
 
@@ -421,6 +465,7 @@ def get_prefetch_manip():
 
 def get_all_manip(args):
     all_manip = []
+    all_manip += get_base_manip()
     # ipc = PerfManip(
     #     name = "global.IPC",
     #     counters = [f"clock_cycle",

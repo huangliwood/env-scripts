@@ -21,11 +21,12 @@ class PerfCounters(object):
     path_re = re.compile(r'(?P<spec_name>\w+((_\w+)|(_\w+\.\w+)|-\d+|))_(?P<time_point>\d+)_(?P<weight>0\.\d+)')
 
     def __init__(self, arg1="", arg2=False):
+        self.path = "unkown"
         self.filename = "unkown"
         self.flag_id = "unkown"
         self.spec_name = "unkown"
         self.point = "0"
-        self.spec_weight = 0
+        self.spec_weight = 0.0000
         self.raw_counters = dict()
         self.dump_counters = dict()
         if isinstance(arg1,str) and isinstance(arg2,bool):
@@ -51,6 +52,8 @@ class PerfCounters(object):
         for key in all_perf_counters:
             updated_perf[key[prefix_length:]] = all_perf_counters[key]
         self.raw_counters = updated_perf
+        self.filename = filename
+        self.path = os.path.dirname(filename)
         if init_spec:
             subStr = filename.rsplit('/',2)[-2]
             subStr = subStr.split('_')
@@ -60,7 +63,7 @@ class PerfCounters(object):
             self.flag_id = filename.rsplit('/',3)[-3]
             self.spec_name = name
             self.point = point
-            self.spec_weight = weight
+            self.spec_weight = "{:.5f}".format(weight)
 
     def spec_init(self,flag_id: str, spec_dir: str, spec_name: str, spec_json):
         """init PerfCounters in SPEC result directory
@@ -132,23 +135,51 @@ class PerfCounters(object):
             updated_perf[key[prefix_length:]] = all_perf_counters[key]
         self.raw_counters = updated_perf
 
-    def add_manip(self, all_manip):
-        if len(self.raw_counters) == 0:
-            return
-        
+    def add_manip(self, all_manip):       
+        with open(os.path.join(self.path,"simulator_out.txt"),"r") as f:
+            log_content = f.read()
+            
         for manip in all_manip:
             caputure_counters=dict()
-            for name in manip.counters:
-                caputure_counters[name]=0
-                for k in self.keys():
-                    if k.endswith(name):
-                        match_key = k
-                        caputure_counters[name] += int(self.raw_counters[match_key])
-                        # print(f"{self.filename}: merging value {match_key} -> {name} : {caputure_counters[name]}")
+            numbers=()
+            pattern=""
+            if manip.get_base:
+                if manip.get_bool:
+                    pattern = re.compile(manip.pattern)
+                    match = re.search(pattern,log_content)
+                    if match :
+                        caputure_counters[manip.name] = True
+                    else:
+                        caputure_counters[manip.name] = False
+                    numbers = [ bool(v) for v in caputure_counters.values()]
+                    self.dump_counters[manip.name] = str(manip.func(*numbers))
+                else:
+                    if manip.pattern:
+                        pattern = re.compile(manip.pattern)
+                    else:
+                        pattern = re.compile(f"{manip.counters[0]} = (\S+)")
+                    match = re.search(pattern,log_content)
+                    if match:
+                        match_str = match.group(1).replace(",","")
+                        caputure_counters[manip.name] = float(match_str)
+                    else:
+                        caputure_counters[manip.name] = -1.00
+                    numbers = [ v for v in caputure_counters.values()]
+                    self.dump_counters[manip.name] = str(manip.func(*numbers)) # numbers are done as parameters passing into func(...)
+                # print(manip.name,caputure_counters[manip.name],self.dump_counters[manip.name])
+            else:
+                if len(self.raw_counters) == 0:
+                    return
+                for name in manip.counters:
+                    caputure_counters[name]=0
+                    for k in self.keys():
+                        if k.endswith(name):
+                            match_key = k
+                            caputure_counters[name] += int(self.raw_counters[match_key])
+                            # print(f"{self.filename}: merging value {match_key} -> {name} : {caputure_counters[name]}")
 
-            numbers = map(lambda name: int(self[name]), caputure_counters)
-            # self.raw_counters[manip.name] = str(manip.func(*numbers))
-            self.dump_counters[manip.name] = str(manip.func(*numbers))
+                    numbers = map(lambda name: int(self[name]), caputure_counters)
+                self.dump_counters[manip.name] = str(manip.func(*numbers))
 
     def get_counter(self, name, strict=False):
         matched_keys = []
@@ -216,12 +247,12 @@ def merge_perf_counters(all_manip,all_perf, verbose=False):
 
     pbar = tqdm(total = len(all_names), disable = not verbose, position = 3)
 
-    yield ["trace","flag_id","weight"] + list(all_perf[0].dump_counters.keys())
+    yield ["trace","flag_id","weight", "point"] + list(all_perf[0].dump_counters.keys())
     for dumpP in all_perf:
         if dumpP.spec_name != "unkown":
-             yield [dumpP.spec_name,dumpP.flag_id,dumpP.spec_weight] + list(dumpP.dump_counters.values())
+             yield [dumpP.spec_name,dumpP.flag_id,dumpP.spec_weight,dumpP.point] + list(dumpP.dump_counters.values())
         elif dumpP.filename != "unkown":     
-            yield [dumpP.filename,dumpP.flag_id,dumpP.spec_weight] + list(dumpP.dump_counters.values())
+            yield [dumpP.filename,dumpP.flag_id,dumpP.spec_weight,dumpP.point] + list(dumpP.dump_counters.values())
 
 def pick(include_names, name, include_manip = False):
     '''
@@ -323,7 +354,7 @@ if __name__ == "__main__":
                 print(f"{file} skipped because it is empty.")
                 return None
         except Exception as e:
-            print(f"Error processing {file}: {str(e)}")
+            print(f"Error processing {perf.path}: {str(e)}")
             return None
     work_queue = Queue()
     perf_queue = Queue()    
@@ -354,7 +385,7 @@ if __name__ == "__main__":
                 perf.add_manip(manip)
                 perf_queue.put(perf)             
             except Exception as e:
-                print(f"Error processing {item}: {str(e)}")
+                print(f"Error processing {perf.path}: {str(e)}")
                 sys.exit(1)  # 自动退出子进程
                 
     for i in range(0, args.jobs):
