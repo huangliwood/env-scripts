@@ -14,7 +14,7 @@ import threading
 import time
 import psutil
 from multiprocessing import Process, Queue
-from colorama import Fore, init
+from colorama import Fore, init , init
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -97,7 +97,7 @@ pending_proc, error_proc = [], []
 def get_available_threads():
   cpu_percentages = psutil.cpu_percent(interval = 2,percpu=True)
   free_threads = [1] * (int(MAX_THREADS))
-  for i, percentage in enumerate(cpu_percentages)  :
+  for i, percentage in enumerate(cpu_percentages):
     if i < MAX_THREADS:
       coreId = i
       if percentage < 20:
@@ -116,7 +116,6 @@ def get_free_cores(free_threads):
           i += sequence_len  
       else:
           i += 1
-
   start_positions = [math.ceil(pos / RUN_THREADS) * RUN_THREADS for pos in start_positions]
   free_cores = [pos // RUN_THREADS for pos in start_positions]
 
@@ -140,6 +139,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
   free_cores = get_free_cores(free_threads)
   max_pending_proc =  len(free_cores)
   can_launch = max_pending_proc
+  print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
   # skip CI cores
   ci_cores = []#list(range(0, 64))# + list(range(32, 48))
   for core in list(map(lambda x: x // threads, ci_cores)):
@@ -148,13 +148,23 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
       max_pending_proc -= 1
       
   start_time = time.time()
-  timeStamp=61
+  timeStamp=0
   try:
     while len(workloads) > 0 or len(pending_proc) > 0:        
       has_pending_workload = len(workloads) > 0 and len(pending_proc) >= max_pending_proc
       has_pending_proc = len(pending_proc) > 0
       # deal when finished, update avaliable cores
       if has_pending_workload or has_pending_proc:
+          # fisrt check pythisc core status
+          if timeStamp > random.uniform(80,200):
+            free_threads = get_available_threads()
+            free_cores = get_free_cores(free_threads)
+            max_pending_proc = len(free_cores)
+            print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
+            can_launch = max_pending_proc
+            timeStamp = 0
+          timeStamp+=1
+        
           finished_proc = list(filter(lambda p: p[1].poll() is not None, pending_proc))
           for workload, proc, core in finished_proc:
             pending_proc.remove((workload, proc, core))
@@ -168,14 +178,6 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
             can_launch += 1
             if can_launch < max_pending_proc:
               can_launch = max_pending_proc
-              
-          free_threads = get_available_threads()
-          free_cores = get_free_cores(free_threads)  
-          if timeStamp > random.uniform(180,200):
-            max_pending_proc = len(free_cores)
-            print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
-            timeStamp = 0
-          timeStamp+=1  
             
           if len(finished_proc) == 0:
             time.sleep(1)
@@ -184,7 +186,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
         continue
 
       for workload in workloads[:can_launch]:
-        if len(free_cores) != 0:   
+        if len(free_cores) != 0: 
           numa_cmd = []
           workload_path = workload.get_bin_path()
           result_path = workload.get_res_dir()
@@ -218,7 +220,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
               print(f"cmd {proc_count}: {cmd_str}")
               proc = subprocess.Popen(run_cmd, stdout=stdout, stderr=stderr, preexec_fn=os.setsid)
               pending_proc.append((workload, proc, allocate_core))
-              free_cores = free_cores[:-2]
+              free_cores = free_cores[:-1]
               
           proc_count += 1
       workloads = workloads[can_launch:]
@@ -317,9 +319,6 @@ def get_total_inst(benchspec, spec_version, isa):
       f.close()
       return int(line.split("instructions = ")[1].replace("\x1b[0m", ""))
   return None
-
-
-
 
 
 
@@ -469,6 +468,8 @@ if __name__ == "__main__":
   
   if args.maxthreads != 0:
     MAX_THREADS = args.maxthreads
+  if args.threads != RUN_THREADS:
+    RUN_THREADS = args.threads
   if args.threads != RUN_THREADS:
     RUN_THREADS = args.threads
   

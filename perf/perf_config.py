@@ -383,28 +383,28 @@ def get_l2_manip():
     all_manip = []
     # Flip rate
     all_manip.append(PerfManip(
-        name = "l2_acquire_hitRate",
+        name = "||-acquire_hitRate",
         counters = [
             "L2_acquire_hit","L2_acquire_miss"
         ],
         func = lambda hit, miss: hit / (hit + miss + 1)
     ))
     all_manip.append(PerfManip( #instr
-        name = "l2_req_getRate",
+        name = "||-req_getRate",
         counters = [
             "L2_get_hit","L2_get_miss"
         ],
         func = lambda hit, miss: hit / (hit + miss + 1)
     ))
     all_manip.append(PerfManip(
-        name = "l2_mshr_TaskHint_proportion",
+        name = "||-mshr_TaskHint_proportion",
         counters = [
             "mshr_hintack_req","mshr_accessackdata_req","mshr_probeackdata_req","mshr_grant_req","mshr_probeack_req","mshr_release_req"
         ],
         func = lambda x1, x2, x3, x4, x5, x6: x1 / (x1+x2+x3+x4+x5+x6+1)
     ))
     all_manip.append(PerfManip(
-        name = "l2_A_req_hitRate",
+        name = "||-A_req_hitRate",
         counters = [
             "L2_a_req_hit","L2_a_req_miss"
         ],
@@ -415,7 +415,7 @@ def get_l2_manip():
 def get_prefetch_manip():
     all_manip = []
     all_manip.append(PerfManip(
-        name = "l2_pfTrain_Miss_proportion",
+        name = "||-pfTrain_Miss_proportion",
         counters = [
             "prefetch_train",
             "prefetch_train_on_miss"
@@ -423,7 +423,7 @@ def get_prefetch_manip():
         func = lambda all,miss: miss / (all + 1)
     ))
     all_manip.append(PerfManip(
-        name = "l2_pfFilter_passRate",
+        name = "||-pfFilter_passRate",
         counters = [
             "hyper_filter_input",
             "hyper_filter_output",
@@ -443,7 +443,7 @@ def get_prefetch_manip():
         ]
     ))
     all_manip.append(PerfManip(
-        name = "l2_spp_proportion",
+        name = "||-spp_proportion",
         counters = [
             "bop_send2_queue",
             "sms_send2_queue",
@@ -452,7 +452,7 @@ def get_prefetch_manip():
         func = lambda sms,bop,spp:  0 if (sms + bop + spp)==0 else spp / (sms + bop + spp)
     ))
     all_manip.append(PerfManip(
-        name = "l2_pf_overlapRate",
+        name = "||-pf_overlapRate",
         counters = [
             "hyper_overlapped",
             "bop_send2_queue",
@@ -461,6 +461,59 @@ def get_prefetch_manip():
         ],
         func = lambda x,y1,y2,y3 : x/(y1+y2+y3+1)
     ))
+    all_manip.append(PerfManip(
+        name = "||-mp_acquire_pfTrain_MISS_proportion",
+        counters = [
+            "acquire_trigger_prefetch_on_miss",
+            "a_req_trigger_prefetch",
+        ],
+        func = lambda x,y : x/(y+1)
+    ))
+    all_manip.append(PerfManip(
+        name = "||-mp_acquire_pfTrain_HIT_proportion",
+        counters = [
+            "acquire_trigger_prefetch_on_hit_pft",
+            "a_req_trigger_prefetch",
+        ],
+        func = lambda x,y : x/(y+1)
+    ))
+    all_manip.append(PerfManip(
+        name = "||-mp_get_pfTrain_MISS_proportion",
+        counters = [
+            "get_trigger_prefetch_on_miss",
+            "a_req_trigger_prefetch",
+        ],
+        func = lambda x,y : x/(y+1)
+    ))   
+    all_manip.append(PerfManip(
+        name = "||-mp_get_pfTrain_HIT_proportion",
+        counters = [
+            "get_trigger_prefetch_on_hit_pft",
+            "a_req_trigger_prefetch",
+        ],
+        func = lambda x,y : x/(y+1)
+    ))  
+
+    # 不能计算有效访问块占比
+    all_manip.append(PerfManip(
+        name = "||-mp_pf_deadBlock_proportion",
+        counters = [
+            "release_prefetch_not_accessed",
+            "release_all",
+        ],
+        func = lambda x,y : x/(y+1)
+    ))
+    all_manip.append(PerfManip(
+        name = "||-mp_pf_earlyPfRate",
+        counters = [
+            "early_prefetch",
+            "mshr_hintack_req",
+        ],
+        func = lambda x,y : x/(y+1)
+    ))
+    
+    
+    
     return all_manip
 
 def get_all_manip(args):
@@ -478,6 +531,7 @@ def get_all_manip(args):
     # all_manip += get_fu_manip()
     if args.pf:
         all_manip += get_prefetch_manip()
+        all_manip += get_l2_manip()
     else:    
         all_manip += get_l2_manip()
         all_manip += get_prefetch_manip()

@@ -39,6 +39,7 @@ class PerfCounters(object):
 
     def file_init(self, filename: str, init_spec: bool = False):
         all_perf_counters = dict()
+        # print(filename)
         with open(filename) as f:
             for line in f:
                 perf_match = self.perf_re.match(line.replace("/", "_"))
@@ -59,7 +60,7 @@ class PerfCounters(object):
             subStr = subStr.split('_')
             name = "_".join(subStr[:-2])
             point = subStr[-2]
-            weight = float(subStr[-1])
+            weight = float(re.sub(r'[^\d.]+', '', subStr[-1]))
             self.flag_id = filename.rsplit('/',3)[-3]
             self.spec_name = name
             self.point = point
@@ -140,7 +141,7 @@ class PerfCounters(object):
             log_content = f.read()
             
         for manip in all_manip:
-            caputure_counters=dict()
+            capture_counters=dict()
             numbers=()
             pattern=""
             if manip.get_base:
@@ -148,10 +149,10 @@ class PerfCounters(object):
                     pattern = re.compile(manip.pattern)
                     match = re.search(pattern,log_content)
                     if match :
-                        caputure_counters[manip.name] = True
+                        capture_counters[manip.name] = True
                     else:
-                        caputure_counters[manip.name] = False
-                    numbers = [ bool(v) for v in caputure_counters.values()]
+                        capture_counters[manip.name] = False
+                    numbers = [ bool(v) for v in capture_counters.values()]
                     self.dump_counters[manip.name] = str(manip.func(*numbers))
                 else:
                     if manip.pattern:
@@ -161,25 +162,27 @@ class PerfCounters(object):
                     match = re.search(pattern,log_content)
                     if match:
                         match_str = match.group(1).replace(",","")
-                        caputure_counters[manip.name] = float(match_str)
+                        capture_counters[manip.name] = float(match_str)
                     else:
-                        caputure_counters[manip.name] = -1.00
-                    numbers = [ v for v in caputure_counters.values()]
+                        capture_counters[manip.name] = -0.00
+                    numbers = [ v for v in capture_counters.values()]
                     self.dump_counters[manip.name] = str(manip.func(*numbers))# numbers are done as parameters passing into func(...)
-                # print(manip.name,caputure_counters[manip.name],self.dump_counters[manip.name])
+                # print(manip.name,capture_counters[manip.name],self.dump_counters[manip.name])
             else:
                 if len(self.raw_counters) == 0:
                     return
                 for name in manip.counters:
-                    caputure_counters[name]=0
+                    capture_counters[name]=0
                     for k in self.keys():
                         if k.endswith(name):
                             match_key = k
-                            caputure_counters[name] += int(self.raw_counters[match_key])
-                            # print(f"{self.filename}: merging value {match_key} -> {name} : {caputure_counters[name]}")
+                            capture_counters[name] += int(self.raw_counters[match_key])
+                            # print(f"{self.filename}: merging value {match_key} -> {name} : {capture_counters[name]}")
 
-                    numbers = map(lambda name: int(self[name]), caputure_counters)
+                    numbers = map(lambda name: int(self[name]), capture_counters)
                 self.dump_counters[manip.name] = str("{:.6f}".format(manip.func(*numbers)))
+                # merge cap
+                self.dump_counters = {**self.dump_counters,**capture_counters}
 
     def get_counter(self, name, strict=False):
         matched_keys = []
@@ -299,7 +302,7 @@ if __name__ == "__main__":
     parser.add_argument('--recursive', '-r', action='store_true', default=False,
         help="recursively find simulator_err.txt")
     parser.add_argument('--dir', '-d', default = None, help="directory")
-    parser.add_argument('--spec_json', '-S', default = None, help="spec test json")
+    parser.add_argument('--spec_json', '-S', default = "config/simpoint_coverage0.3_test.json", help="spec test json")
     parser.add_argument('--verbose', '-v', action='store_true', default=False,
         help="show processing logs")
     parser.add_argument('--include', '-I', action='extend', nargs='+', type=str, help="select given counters (using re)")
@@ -320,12 +323,11 @@ if __name__ == "__main__":
         pfiles = find_simulator_err(args.pfiles)
 
     normalize_spec = dict()
-    if args.dir is not None:
-        if args.spec_json is not None:
-            with open(args.spec_json) as f:
-                normalize_spec = json.load(f)
-        else:
-            pfiles += find_all_in_dir(args.dir)
+    # deal specfied json config
+    if args.pf:
+        args.spec_json="config/prefetch_simpoint_coverage0.3_test.json"
+    with open(args.spec_json) as f:
+        normalize_spec = json.load(f)
 
     if args.include is not None:
         args.include = list(map(lambda x: re.compile(x), args.include))
@@ -357,22 +359,27 @@ if __name__ == "__main__":
             print(f"Error processing {perf.path}: {str(e)}")
             return None
     work_queue = Queue()
-    perf_queue = Queue()    
+    perf_queue = Queue()
+    
+    
+    # recursively append subdir's logs
     if args.all:
-        if args.pf:
-            root_dir = args.dir
-            pfiles += find_simulator_err(str(root_dir))
-        else:
-            root_dir = args.dir
-            data_dirList = [d for d in os.listdir(args.dir) if os.path.isdir(os.path.join(args.dir, d))]
-            data_dirList = list(map(lambda x:os.path.join(args.dir, x),data_dirList))
-            pfiles_dict = {}
-            for batch_dir in data_dirList:
-                batch_name = os.path.basename(batch_dir)
-                pfiles_dict['path'] = find_simulator_err(str(batch_dir))
-                    
-                pfiles += find_simulator_err(str(batch_dir))
-                # pfiles = list(filter(lambda k: os.path.basename(k) in batch_name, normalize_spec.keys())) #todo: hasebug
+        root_dir = args.dir
+        data_dirList = [d for d in os.listdir(args.dir) if os.path.isdir(os.path.join(args.dir, d))]
+        data_dirList = list(map(lambda x:os.path.join(args.dir, x),data_dirList))
+        pfiles_filter = []
+        for batch_dir in data_dirList:
+            batch_name = os.path.basename(batch_dir)
+            pfiles += find_simulator_err(str(batch_dir))
+        if normalize_spec:
+            def is_spec(filename):
+                subStr = filename.rsplit('/',2)[-2]
+                subStr = subStr.split('_')
+                name = "_".join(subStr[:-2])
+                if name in normalize_spec.keys():
+                    return filename
+            pfiles_filter = list(filter(lambda k: is_spec(k) , pfiles)) #todo: hasebug
+            pfiles = pfiles_filter
     for f in pfiles:
         work_queue.put(f)
     files_count = work_queue.qsize()
@@ -399,9 +406,7 @@ if __name__ == "__main__":
             pbar.display(f"Processing files with {args.jobs} threads ...", 0)
         
         perf = perf_queue.get()
-        all_perf.append(perf)
-        
-        if perf:
+        if perf and perf not in all_perf:
             all_perf.append(perf)
         elif perf:
             pbar.write(f"{perf.filename} skipped because it is empty.")
@@ -433,22 +438,21 @@ if __name__ == "__main__":
     data = list(merge_perf_counters(all_manip, all_perf, args.verbose))
     df = pd.DataFrame(data[1:], columns=data[0])
     excel_path = args.output
-    root_name = os.path.basename(args.dir)
-    if os.path.exists(excel_path):
-        with pd.ExcelFile(excel_path,engine="openpyxl") as xls:
-            sheets = xls.sheet_names
-        original_name = os.path.basename(excel_path)
-        counter = random.randint(0, 9999)
-        if root_name in sheets:
-            root_name = args.dir.split('/')
-            root_name = f"{root_name[-3]}_{root_name[-2]}"
-            # root_name = f"perf-{sheets[0]}_{counter}"
-            # counter += 1
-        with pd.ExcelWriter(excel_path, engine='openpyxl', mode='w') as writer:
-            df.to_excel(writer, sheet_name=root_name, index=False)
+    dir = str(args.dir).split('/')
+    if len(dir) >=3 :
+        sheet_name = "_".join(dir[-3:])
     else:
-        with pd.ExcelWriter(excel_path, engine='openpyxl', mode='w') as writer:
-            df.to_excel(writer, sheet_name=root_name, index=False)
+        sheet_name = os.path.basename(args.dir)
+    # if os.path.exists(excel_path):
+    #     with pd.ExcelFile(excel_path,engine="openpyxl") as xls:
+    #         sheets = xls.sheet_names
+    #         if sheet_name in sheets:
+    #             root_name = f"{sheet_name}_1"
+    #         with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
+    #             df.to_excel(writer, sheet_name=sheet_name, index=False)
+    # else:
+    with pd.ExcelWriter(excel_path, engine='openpyxl', mode='w') as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
             
          
     # with open(args.output, 'w') as csvfile:
