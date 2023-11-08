@@ -375,7 +375,7 @@ def get_base_manip():
         name = "simTime_hour",
         get_base=True,
         pattern="Host time spent: (\d+(,\d+)*)ms",
-        func= lambda x : f"{x/(3600000):1f}h"
+        func= lambda x : f"{x/(3600000):2f}"
     ))
     return all_manip
 

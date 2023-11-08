@@ -365,8 +365,8 @@ if __name__ == "__main__":
     # recursively append subdir's logs
     if args.all:
         root_dir = args.dir
-        data_dirList = [d for d in os.listdir(args.dir) if os.path.isdir(os.path.join(args.dir, d))]
-        data_dirList = list(map(lambda x:os.path.join(args.dir, x),data_dirList))
+        data_dirList = [d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
+        data_dirList = list(map(lambda x:os.path.join(root_dir, x),data_dirList))
         pfiles_filter = []
         for batch_dir in data_dirList:
             batch_name = os.path.basename(batch_dir)
@@ -380,6 +380,12 @@ if __name__ == "__main__":
                     return filename
             pfiles_filter = list(filter(lambda k: is_spec(k) , pfiles)) #todo: hasebug
             pfiles = pfiles_filter
+    else:
+        batch_dir = args.dir
+        batch_name = os.path.basename(batch_dir)
+        pfiles += find_simulator_err(str(batch_dir))
+        
+        
     for f in pfiles:
         work_queue.put(f)
     files_count = work_queue.qsize()
@@ -390,7 +396,8 @@ if __name__ == "__main__":
                 item = work_queue.get()
                 perf = PerfCounters(item,True)
                 perf.add_manip(manip)
-                perf_queue.put(perf)             
+                perf_queue.put(perf)
+                print(perf.filename)          
             except Exception as e:
                 print(f"Error processing {perf.path}: {str(e)}")
                 sys.exit(1)  # 自动退出子进程
@@ -441,18 +448,20 @@ if __name__ == "__main__":
     dir = str(args.dir).split('/')
     if len(dir) >=3 :
         sheet_name = "_".join(dir[-3:])
+        if len(sheet_name) > 20:
+            sheet_name = "_".join(dir[-2:])
     else:
         sheet_name = os.path.basename(args.dir)
-    # if os.path.exists(excel_path):
-    #     with pd.ExcelFile(excel_path,engine="openpyxl") as xls:
-    #         sheets = xls.sheet_names
-    #         if sheet_name in sheets:
-    #             root_name = f"{sheet_name}_1"
-    #         with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
-    #             df.to_excel(writer, sheet_name=sheet_name, index=False)
-    # else:
-    with pd.ExcelWriter(excel_path, engine='openpyxl', mode='w') as writer:
-        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    if os.path.exists(excel_path):
+        with pd.ExcelFile(excel_path,engine="openpyxl") as xls:
+            sheets = xls.sheet_names
+            while sheet_name in sheets:
+                sheet_name = f"{sheet_name}_1"
+            with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+    else:
+        with pd.ExcelWriter(excel_path, engine='openpyxl', mode='w') as writer:
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
             
          
     # with open(args.output, 'w') as csvfile:

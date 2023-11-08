@@ -424,10 +424,7 @@ def xs_report_top_down(all_gcpt, xs_path, spec_version, isa, num_jobs):
 
 def xs_show(all_gcpt):
   i=0
-  i=0
   for gcpt in all_gcpt:
-    gcpt.show(i)
-    i+=1
     gcpt.show(i)
     i+=1
 
@@ -529,7 +526,6 @@ if __name__ == "__main__":
                          xs_path=args.xs, 
                          sorted_by=lambda x: -x.eval_run_hours
                          )
-
     if (len(gcpt) == 0):
       print("All the tests are already finished.")
       print(f"perf_base_path: {get_perf_base_path()}")
