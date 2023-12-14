@@ -160,7 +160,8 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
             free_threads = get_available_threads()
             free_cores = get_free_cores(free_threads)
             max_pending_proc = len(free_cores)
-            print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
+            if timeStamp > 150:
+              print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
             can_launch = max_pending_proc
             timeStamp = 0
           timeStamp+=1
@@ -169,6 +170,8 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
           for workload, proc, core in finished_proc:
             pending_proc.remove((workload, proc, core))
             print(Fore.GREEN+f"{workload} has finished\n")
+            used_time = time.time() - start_time
+            print(Fore.GREEN+f"[{used_time/60:.2f} min]")
             if core not in free_cores:
               free_cores.append(core)
             if proc.returncode != 0:
@@ -443,7 +446,7 @@ if __name__ == "__main__":
   parser.add_argument('--cmdline-opt', default="nanhu", type=str, help='xs emu command line options, nanhu or kunminghu')
   parser.add_argument('--ref', default=None, type=str, help='path to ref')
   parser.add_argument('--warmup', '-W', default=5000000, type=int, help="warmup instr count")
-  parser.add_argument('--max-instr', '-I', default=20000000, type=int, help="max instr count")
+  parser.add_argument('--max-instr', '-I', default=40000000, type=int, help="max instr count")
   parser.add_argument('--threads', '-T', default=16, type=int, help="number of emu threads")
   parser.add_argument('--maxthreads', '-t', default=0, type=int, help="number of emu threads")
   parser.add_argument('--report', '-R', action='store_true', default=False, help='report only')
@@ -458,6 +461,7 @@ if __name__ == "__main__":
   parser.add_argument('--override', action='store_true', default=False, help="continue to exe, ignore the aborted and success tests")
   parser.add_argument('--pf', action='store_true', default=False, help="specify for prefetcher")
   parser.add_argument('--pfFast', action='store_true', default=False, help="specify for prefetcher fast")
+  parser.add_argument('--pf_specInt', action='store_true', default=False, help="specify for spec Int traces")
   parser.add_argument('--all', action='store_true', default=False, help="report regression for specify directory's all subdirectories ")
 
   args = parser.parse_args()
@@ -474,6 +478,8 @@ if __name__ == "__main__":
     args.json_path=os.path.abspath("config/prefetch_simpoint_coverage0.3_test.json")
   if args.pfFast:
     args.json_path=os.path.abspath("config/prefetchFast_simpoint_coverage0.3_test.json")
+  if args.pf_specInt:
+    args.json_path=os.path.abspath("config/spec06Int_coverage0.3_test.json")
     
   if args.dir is not None:
     TASKS_DIR = args.dir

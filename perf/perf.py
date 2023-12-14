@@ -25,6 +25,7 @@ class PerfCounters(object):
         self.filename = "unkown"
         self.flag_id = "unkown"
         self.spec_name = "unkown"
+        self.is_spec = True
         self.point = "0"
         self.spec_weight = 0.0000
         self.raw_counters = dict()
@@ -55,6 +56,7 @@ class PerfCounters(object):
         self.raw_counters = updated_perf
         self.filename = filename
         self.path = os.path.dirname(filename)
+        self.is_spec = init_spec
         if init_spec:
             subStr = filename.rsplit('/',2)[-2]
             subStr = subStr.split('_')
@@ -65,6 +67,10 @@ class PerfCounters(object):
             self.spec_name = name
             self.point = point
             self.spec_weight = "{:.5f}".format(weight)
+        else:
+            self.flag_id = filename.rsplit('/',2)[-2]
+            self.spec_name = filename.split('/')[-1].split('.')[0]
+            
 
     def spec_init(self,flag_id: str, spec_dir: str, spec_name: str, spec_json):
         """init PerfCounters in SPEC result directory
@@ -136,10 +142,14 @@ class PerfCounters(object):
             updated_perf[key[prefix_length:]] = all_perf_counters[key]
         self.raw_counters = updated_perf
 
-    def add_manip(self, all_manip):       
-        with open(os.path.join(self.path,"simulator_out.txt"),"r") as f:
-            log_content = f.read()
-            
+    def add_manip(self, all_manip):
+        if self.is_spec:
+            with open(os.path.join(self.path,"simulator_out.txt"),"r") as f:
+                log_content = f.read()
+        else:
+            with open(self.filename,"r") as f:
+                log_content = f.read()
+        error_flag = 0    
         for manip in all_manip:
             capture_counters=dict()
             numbers=()
@@ -169,8 +179,9 @@ class PerfCounters(object):
                     self.dump_counters[manip.name] = str(manip.func(*numbers))# numbers are done as parameters passing into func(...)
                 # print(manip.name,capture_counters[manip.name],self.dump_counters[manip.name])
             else:
-                if len(self.raw_counters) == 0:
-                    return
+                if len(self.raw_counters) == 0 and not error_flag:
+                    error_flag = 1
+                    print(Fore.RED+f"error:{self.filename} has empty base counter")
                 for name in manip.counters:
                     capture_counters[name]=0
                     for k in self.keys():
@@ -252,10 +263,10 @@ def merge_perf_counters(all_manip,all_perf, verbose=False):
 
     yield ["trace","flag_id","weight", "point"] + list(all_perf[0].dump_counters.keys())
     for dumpP in all_perf:
-        if dumpP.spec_name != "unkown":
-             yield [dumpP.spec_name,dumpP.flag_id,dumpP.spec_weight,dumpP.point] + list(dumpP.dump_counters.values())
-        elif dumpP.filename != "unkown":     
-            yield [dumpP.filename,dumpP.flag_id,dumpP.spec_weight,dumpP.point] + list(dumpP.dump_counters.values())
+        if dumpP.is_spec :
+            yield [dumpP.spec_name,dumpP.flag_id,dumpP.spec_weight,dumpP.point] + list(dumpP.dump_counters.values())
+        else:
+            yield [dumpP.spec_name,dumpP.flag_id,dumpP.spec_weight,dumpP.point] + list(dumpP.dump_counters.values())
 
 def pick(include_names, name, include_manip = False):
     '''
@@ -276,8 +287,9 @@ def find_simulator_err(base_path):
     all_files = []
     for sub_dir in os.listdir(base_path):
         sub_path = os.path.join(base_path, sub_dir)
-        if os.path.isfile(sub_path) and sub_dir == "simulator_err.txt":
-            all_files.append(sub_path)
+        if os.path.isfile(sub_path):
+            if sub_dir == "simulator_err.txt" or sub_dir.endswith(".log"):
+                all_files.append(sub_path)
         elif os.path.isdir(sub_path):
             all_files += find_simulator_err(sub_path)
     return all_files
@@ -293,6 +305,7 @@ def find_all_in_dir(dir_path):
             print("find non-file " + sub_path)
     return all_files
 
+cur_path="/nfs/home/qiminhao/code/wenshanhu"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='performance counter log parser')
     parser.add_argument('--pfiles', metavar='filename', type=str, nargs='*', default=None,
@@ -302,7 +315,8 @@ if __name__ == "__main__":
     parser.add_argument('--recursive', '-r', action='store_true', default=False,
         help="recursively find simulator_err.txt")
     parser.add_argument('--dir', '-d', default = None, help="directory")
-    parser.add_argument('--spec_json', '-S', default = "config/simpoint_coverage0.3_test.json", help="spec test json")
+    parser.add_argument('--spec_json', '-S', default = f"{cur_path}/config/simpoint_coverage0.3_test.json", help="spec test json")
+    parser.add_argument('--spec',action='store_true',default=False)
     parser.add_argument('--verbose', '-v', action='store_true', default=False,
         help="show processing logs")
     parser.add_argument('--include', '-I', action='extend', nargs='+', type=str, help="select given counters (using re)")
@@ -313,6 +327,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     pfiles = []
+
     
     if args.filelist is not None:
         with open(args.filelist) as f:
@@ -325,9 +340,10 @@ if __name__ == "__main__":
     normalize_spec = dict()
     # deal specfied json config
     if args.pf:
-        args.spec_json="config/prefetch_simpoint_coverage0.3_test.json"
-    with open(args.spec_json) as f:
-        normalize_spec = json.load(f)
+        args.spec_json=f"{cur_path}/config/prefetch_simpoint_coverage0.3_test.json"
+    if args.spec:
+        with open(args.spec_json) as f:
+            normalize_spec = json.load(f)
 
     if args.include is not None:
         args.include = list(map(lambda x: re.compile(x), args.include))
@@ -371,7 +387,7 @@ if __name__ == "__main__":
         for batch_dir in data_dirList:
             batch_name = os.path.basename(batch_dir)
             pfiles += find_simulator_err(str(batch_dir))
-        if normalize_spec:
+        if args.spec:
             def is_spec(filename):
                 subStr = filename.rsplit('/',2)[-2]
                 subStr = subStr.split('_')
@@ -394,12 +410,15 @@ if __name__ == "__main__":
         while not work_queue.empty():
             try:
                 item = work_queue.get()
-                perf = PerfCounters(item,True)
+                if args.spec:
+                    perf = PerfCounters(item,True)
+                else:
+                    perf = PerfCounters(item,False)
                 perf.add_manip(manip)
                 perf_queue.put(perf)
                 print(perf.filename)          
             except Exception as e:
-                print(f"Error processing {perf.path}: {str(e)}")
+                print(f"perfwork: Error processing {perf.path}: {str(e)}")
                 sys.exit(1)  # 自动退出子进程
                 
     for i in range(0, args.jobs):
