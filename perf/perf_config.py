@@ -541,9 +541,23 @@ def get_l2_manip():
     all_manip.append(PerfManip(
         name = "||-normalAcquire_hitRate",
         counters = [
-            "L2_acquire_hit","L2_acquire_miss"
+            "L2_a_req_hit","L2_a_req_miss"
         ],
         func = lambda hit, miss: hit / (hit + miss + 1)
+    ))
+    all_manip.append(PerfManip(
+        name = "||-pfReq_missRate",
+        counters = [
+            "L2_a_pfReq_miss","L2_a_pfReq_hit"
+        ],
+        func = lambda x, y: x / (x + y+ 1)
+    ))
+    all_manip.append(PerfManip(
+        name = "||-acquire_proportion",
+        counters = [
+            "L2_req_hit","L2_a_req_hit","L2_a_req_miss"
+        ],
+        func = lambda x, y1,y2: (y1+y2) / (x + y1 + y2 + 1)
     ))
     all_manip.append(PerfManip(
         name = "||-pfReq_missRate",
@@ -562,6 +576,7 @@ def get_l2_manip():
     all_manip.append(PerfManip( #instr
         name = "||-req_getRate",
         counters = [
+            "L2_a_get_hit","L2_a_get_miss"
             "L2_a_get_hit","L2_a_get_miss"
         ],
         func = lambda hit, miss: hit / (hit + miss + 1)
@@ -741,7 +756,6 @@ def get_prefetch_manip():
 
 def get_all_manip(args):
     all_manip = []
-    all_manip += get_base_manip()
     # ipc = PerfManip(
     #     name = "global.IPC",
     #     counters = [f"clock_cycle",
@@ -760,5 +774,4 @@ def get_all_manip(args):
         all_manip += get_l2_manip()
         all_manip += get_prefetch_manip()
         
-    
     return all_manip

@@ -6,8 +6,8 @@ import os
 import random
 import re
 from multiprocessing import Process, Queue
-import sys
 import time
+import sys
 import pandas as pd
 from tqdm import tqdm
 import json
@@ -16,6 +16,9 @@ init(autoreset=True)
 from perf_config import get_all_manip
 import concurrent.futures
 from concurrent.futures import as_completed
+
+is_deal_one = False     
+
 class PerfCounters(object):
     perf_re = re.compile(r'.*\[PERF \]\[time=\s+\d+\] (([a-zA-Z0-9_]+\.)+[a-zA-Z0-9_]+): ((\w| |\')+),\s+(\d+)$')
     path_re = re.compile(r'(?P<spec_name>\w+((_\w+)|(_\w+\.\w+)|-\d+|))_(?P<time_point>\d+)_(?P<weight>0\.\d+)')
@@ -308,10 +311,12 @@ def find_all_in_dir(dir_path):
 cur_path="/nfs/home/qiminhao/code/wenshanhu"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='performance counter log parser')
-    parser.add_argument('--pfiles', metavar='filename', type=str, nargs='*', default=None,
-                        help='performance counter log')
+    parser.add_argument('--pfile', '-f', type=str, default=None,
+        help='specify one performance counter log')
+    parser.add_argument('--pfiles',  metavar='filename', type=str, nargs='*', default=None,
+        help='specify more than one performance counter log')
     parser.add_argument('--output', '-o', default="stats.csv", help='output file')
-    parser.add_argument('--filelist', '-f', default=None, help="filelist")
+    parser.add_argument('--filelist', default=None, help="filelist")
     parser.add_argument('--recursive', '-r', action='store_true', default=False,
         help="recursively find simulator_err.txt")
     parser.add_argument('--dir', '-d', default = None, help="directory")
@@ -333,11 +338,21 @@ if __name__ == "__main__":
         with open(args.filelist) as f:
             pfiles = list(map(lambda x: x.strip(), f.readlines()))
  
-    # for every file in SPEC tests
-    if args.recursive:
-        pfiles = find_simulator_err(args.pfiles)
+    # specify one perf file log
+    if args.pfile:
+        pfile_abs = os.path.join(os.getcwd(),args.pfile)
+        pfiles.append(pfile_abs)
 
     normalize_spec = dict()
+    if args.dir is not None:
+        if args.spec_json is not None:
+            with open(args.spec_json) as f:
+                normalize_spec = json.load(f)
+        else:
+            pfiles += find_all_in_dir(args.dir)
+   
+    if len(pfiles) == 1:
+        is_deal_one =True
     # deal specfied json config
     if args.pf:
         args.spec_json=f"{cur_path}/config/prefetch_simpoint_coverage0.3_test.json"
@@ -378,8 +393,10 @@ if __name__ == "__main__":
     perf_queue = Queue()
     
     
-    # recursively append subdir's logs
-    if args.all:
+    if is_deal_one:
+        args.jobs = 1
+        work_queue.put(pfiles[0])
+    elif args.all:
         root_dir = args.dir
         data_dirList = [d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
         data_dirList = list(map(lambda x:os.path.join(root_dir, x),data_dirList))
@@ -396,14 +413,16 @@ if __name__ == "__main__":
                     return filename
             pfiles_filter = list(filter(lambda k: is_spec(k) , pfiles)) #todo: hasebug
             pfiles = pfiles_filter
+        for f in pfiles:
+            work_queue.put(f)
     else:
         batch_dir = args.dir
         batch_name = os.path.basename(batch_dir)
         pfiles += find_simulator_err(str(batch_dir))
+        for f in pfiles:
+            work_queue.put(f)
         
-        
-    for f in pfiles:
-        work_queue.put(f)
+
     files_count = work_queue.qsize()
 
     def perf_work(manip, work_queue, perf_queue):
@@ -464,20 +483,32 @@ if __name__ == "__main__":
     data = list(merge_perf_counters(all_manip, all_perf, args.verbose))
     df = pd.DataFrame(data[1:], columns=data[0])
     excel_path = args.output
+    root_name = os.path.basename(root_dir)
     dir = str(args.dir).split('/')
     if len(dir) >=3 :
         sheet_name = "_".join(dir[-3:])
         if len(sheet_name) > 20:
             sheet_name = "_".join(dir[-2:])
     else:
-        sheet_name = os.path.basename(args.dir)
+        sheet_name = os.path.basename(root_name)
     if os.path.exists(excel_path):
         with pd.ExcelFile(excel_path,engine="openpyxl") as xls:
             sheets = xls.sheet_names
+        original_name = os.path.basename(excel_path)
+        counter = random.randint(0, 9999)
+        if root_name in sheets:
+            if is_deal_one:
+                root_name = f"{time.strftime('%m-%d-%H:%M',time.localtime())}"
+            else:
+                root_name = root_dir.split('/')
+                root_name = f"{root_name[-3]}_{root_name[-2]}"
+                # root_name = f"perf-{sheets[0]}_{counter}"
+                # counter += 1
+        if not is_deal_one:        
             while sheet_name in sheets:
                 sheet_name = f"{sheet_name}_1"
-            with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a',if_sheet_exists='overlay') as writer:
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
     else:
         with pd.ExcelWriter(excel_path, engine='openpyxl', mode='w') as writer:
             df.to_excel(writer, sheet_name=sheet_name, index=False)
