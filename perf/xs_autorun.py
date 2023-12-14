@@ -134,11 +134,13 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
   else:
     sys.exit("unsupported xs emu command line options, use nanhu or kunminghu")
   # base_arguments = [emu_path, '-W', str(warmup), '-I', str(max_instr), '-i']
-  proc_count, finish_count = 0, 0
+  proc_count, finish_count, all_count = 0, 0, len(workloads)
   free_threads = get_available_threads()
   free_cores = get_free_cores(free_threads)
   max_pending_proc =  len(free_cores)
   can_launch = max_pending_proc
+  skip = False
+  preSkip_nums = 0
   print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
   # skip CI cores
   ci_cores = []#list(range(0, 64))# + list(range(32, 48))
@@ -154,22 +156,22 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
       has_pending_workload = len(workloads) > 0 and len(pending_proc) >= max_pending_proc
       has_pending_proc = len(pending_proc) > 0
       # deal when finished, update avaliable cores
-      if has_pending_workload or has_pending_proc:
+      if has_pending_workload or has_pending_proc or skip:
           # fisrt check pythisc core status
-          if timeStamp > random.uniform(80,200):
+          if timeStamp > random.uniform(30,60) or skip:
             free_threads = get_available_threads()
             free_cores = get_free_cores(free_threads)
             max_pending_proc = len(free_cores)
-            if timeStamp > 150:
-              print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
             can_launch = max_pending_proc
+            # if timeStamp > 30:
+            # print(f"free_cores:{free_cores} max_pending_proc:{max_pending_proc} pending_proc_nums:{len(pending_proc)} can_lanuch:{can_launch}")
             timeStamp = 0
           timeStamp+=1
         
           finished_proc = list(filter(lambda p: p[1].poll() is not None, pending_proc))
           for workload, proc, core in finished_proc:
             pending_proc.remove((workload, proc, core))
-            print(Fore.GREEN+f"{workload} has finished\n")
+            print(Fore.GREEN+f"{workload} has finished | fininhed_{finish_count} all_{all_count} \n")
             used_time = time.time() - start_time
             print(Fore.GREEN+f"[{used_time/60:.2f} min]")
             if core not in free_cores:
@@ -200,14 +202,19 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
             os.makedirs(result_path, exist_ok=False)
           elif not args.override:
             if os.path.exists(stderr_file) and os.path.exists(stdout_file):
-              # check if previous finined 
               with open(stdout_file, 'r') as f:
-                content = f.read()
-                if "ABORT" not in content.upper() and "IPC = -nan" not in content and "Host time spent:" in content:
-                    print(Fore.RED + f"cmd {proc_count}: previous sim not finished ,resiming...")
-                    skip=False
-                # else :
-                    #print(f"cmd {proc_count}: {numa_cmd+base_arguments+[workload_path]} need override")
+                last3_lines = "".join(f.readlines()[-3:])
+                if "DRAMsim3 memory system initialized." in last3_lines:
+                  skip = True
+                  preSkip_nums += 1
+                  print(Fore.GREEN + f"cmd_{proc_count}: confictd with another excuting process ,will skipping...")
+                else:
+                  # check if previous finined 
+                  content = f.read()
+                  if "ABORT" not in content.upper() and "IPC = -nan" not in content and "Host time spent:" in content:
+                      print(Fore.RED + f"cmd_{proc_count}: previous sim not finished ,resiming...")
+                  # else :
+                      #print(f"cmd {proc_count}: {numa_cmd+base_arguments+[workload_path]} need override")
           if not skip:
             allocate_core = free_cores[-1]
             if threads > 1:
@@ -220,7 +227,7 @@ def xs_run(workloads, xs_path ,emu_path, warmup, max_instr, threads, cmdline_opt
               random_seed = random.randint(0, 9999)
               run_cmd = numa_cmd + base_arguments + [workload_path] + ["-s", f"{random_seed}"]
               cmd_str = " ".join(run_cmd)
-              print(f"cmd {proc_count}: {cmd_str}")
+              print(f"cmd_{proc_count}: {cmd_str}")
               proc = subprocess.Popen(run_cmd, stdout=stdout, stderr=stderr, preexec_fn=os.setsid)
               pending_proc.append((workload, proc, allocate_core))
               free_cores = free_cores[:-1]
@@ -489,13 +496,6 @@ if __name__ == "__main__":
 
   if args.show:
     gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, xs_path=args.xs, sorted_by=lambda x: -x.eval_run_hours)
-    #gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
-      #state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: x.get_simulation_cps())
-      #state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: x.get_ipc())
-      #state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
-      #state_filter=[GCPT.STATE_RUNNING], xs_path=args.ref, sorted_by=lambda x: x.benchspec.lower())
-      #state_filter=[GCPT.STATE_FINISHED], xs_path=args.ref, sorted_by=lambda x: -x.num_cycles)
-      #state_filter=[GCPT.STATE_ABORTED], xs_path=args.ref, sorted_by=lambda x: -x.num_cycles)
     xs_show(gcpt)
   elif args.debug:
     gcpt = load_all_gcpt(args.gcpt_path, args.json_path, args.threads, 
