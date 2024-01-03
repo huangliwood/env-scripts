@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 import argparse
+from datetime import datetime
 import os
 import pandas as pd
 def get_spec_reftime(benchspec, spec_version):
@@ -114,13 +115,13 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
     total_score *= score
     if enPrint:
       print(f"{spec_name:>15}: {score:6.3f}, {score / frequency:6.3f}")
-    data.append([spec_name, score, score / frequency])
+    data.append([spec_name, f"{score:6.3f}", f"{score / frequency:6.3f}"])
     spec_score[spec_name] = score
   geomean_score = total_score ** (1 / total_count)
   if enPrint:
     print(f"SPEC{spec_version}@{frequency}GHz: {geomean_score:6.3f}")
     print(f"SPEC{spec_version}/GHz:  {geomean_score / frequency:6.3f}")
-  data.append([f"SPEC{spec_version}@GHz", geomean_score,geomean_score / frequency])
+  data.append([f"SPEC{spec_version}@GHz", f"{geomean_score:6.3f}",f"{geomean_score / frequency:6.3f}"])
   if enPrint:
     print()
     print(f"********* SPECINT {spec_version} *********")
@@ -136,7 +137,7 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
         specint_score *= score
         if enPrint:
           print(f"{benchspec:>15}: {score:6.3f}, {score / frequency:6.3f}")
-        data.append([benchspec, score, score / frequency])
+        data.append([benchspec, f"{score:6.3f}", f"{score / frequency:6.3f}"])
     if not found:
       # print(f"{benchspec:>15}: N/A")
       continue
@@ -144,7 +145,7 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
   if enPrint:
     print([f"SPECint{spec_version}@{frequency}GHz: {geomean_specint_score:6.3f}"])
     print([f"SPECint{spec_version}/GHz:  {geomean_specint_score / frequency:6.3f}"])
-  data.append([f"SPECint{spec_version}@GHz:", geomean_specint_score,geomean_specint_score / frequency])
+  data.append([f"SPECint{spec_version}@GHz:", f"{geomean_specint_score:6.3f}", f"{geomean_specint_score / frequency:6.3f}"])
   if enPrint:
     print()
     print(f"********* SPECFP  {spec_version} *********")
@@ -160,7 +161,7 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
         specfp_score *= score
         if enPrint:
           print(f"{benchspec:>15}: {score:6.3f}, {score / frequency:6.3f}")
-        data.append([benchspec,score, score / frequency])
+        data.append([benchspec,f"{score:6.3f}", f"{score / frequency:6.3f}"])
     if not found:
       continue
       print(f"{benchspec:>15}: N/A")
@@ -169,7 +170,7 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
   if enPrint:
     print(f"SPECfp{spec_version}@{frequency}GHz: {geomean_specfp_score:6.3f}")
     print(f"SPECfp{spec_version}/GHz: {geomean_specfp_score / frequency:6.3f}")
-  data.append([f"SPECfp{spec_version}@GHz:", geomean_specfp_score, geomean_specfp_score / frequency])
+  data.append([f"SPECfp{spec_version}@GHz:", f"{geomean_specfp_score:6.3f}", f"{geomean_specfp_score / frequency:6.3f}"])
 
 
   dir = os.path.abspath(args.dir)
@@ -180,22 +181,21 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
     name = os.path.basename(args.dir)
     excel_path =f"{os.path.dirname(dir)}/result.xlsx"
   
-  print(f"save data to {excel_path} sheet:{name}")
+  print(f"save data to {excel_path} \nsheet:{name}")
   
   df = pd.DataFrame(data, columns=['BenchSpec', f'{name}@2GHZ', f'{name}@1GHz'])
   if os.path.exists(excel_path):
     with pd.ExcelFile(excel_path) as xls:
         sheets = xls.sheet_names
     original_name = name
-    counter = 1
-    while name in sheets:
-        name = f"{original_name}_{counter}"
-        counter += 1
-
-    with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a') as writer:
+    if [original_name in n for n in sheets]:
+      dateTime = datetime.now().strftime("%H_%M")
+      name = f"{original_name}_{dateTime}"
+    print(f"sheet:{name}")
+    with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
         df.to_excel(writer, sheet_name=name, index=False)
   else:
-    with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+    with pd.ExcelWriter(excel_path, engine='openpyxl', mode='w') as writer:
           df.to_excel(writer, sheet_name=name, index=False)
   print()
 

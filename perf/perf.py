@@ -392,12 +392,11 @@ if __name__ == "__main__":
     work_queue = Queue()
     perf_queue = Queue()
     
-    
+    root_dir = args.dir
     if is_deal_one:
         args.jobs = 1
         work_queue.put(pfiles[0])
     elif args.all:
-        root_dir = args.dir
         data_dirList = [d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
         data_dirList = list(map(lambda x:os.path.join(root_dir, x),data_dirList))
         pfiles_filter = []

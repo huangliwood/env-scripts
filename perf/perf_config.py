@@ -576,15 +576,20 @@ def get_l2_manip():
     all_manip.append(PerfManip( #instr
         name = "||-req_getRate",
         counters = [
-            "L2_a_get_hit","L2_a_get_miss"
-            "L2_a_get_hit","L2_a_get_miss"
+            "L2_a_get_hit",
+            "L2_a_get_miss"
         ],
         func = lambda hit, miss: hit / (hit + miss + 1)
     ))
     all_manip.append(PerfManip(
         name = "||-mshr_TaskHint_proportion",
         counters = [
-            "mshr_hintack_req","mshr_accessackdata_req","mshr_probeackdata_req","mshr_grant_req","mshr_probeack_req","mshr_release_req"
+            "mshr_hintack_req",
+            "mshr_accessackdata_req",
+            "mshr_probeackdata_req",
+            "mshr_grant_req",
+            "mshr_probeack_req",
+            "mshr_release_req"
         ],
         func = lambda x1, x2, x3, x4, x5, x6: x1 / (x1+x2+x3+x4+x5+x6+1)
     ))

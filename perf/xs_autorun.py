@@ -469,6 +469,7 @@ if __name__ == "__main__":
   parser.add_argument('--pf', action='store_true', default=False, help="specify for prefetcher")
   parser.add_argument('--pfFast', action='store_true', default=False, help="specify for prefetcher fast")
   parser.add_argument('--pf_specInt', action='store_true', default=False, help="specify for spec Int traces")
+  parser.add_argument('--pf_specFp', action='store_true', default=False, help="specify for spec Int traces")
   parser.add_argument('--all', action='store_true', default=False, help="report regression for specify directory's all subdirectories ")
 
   args = parser.parse_args()
@@ -487,6 +488,8 @@ if __name__ == "__main__":
     args.json_path=os.path.abspath("config/prefetchFast_simpoint_coverage0.3_test.json")
   if args.pf_specInt:
     args.json_path=os.path.abspath("config/spec06Int_coverage0.3_test.json")
+  elif args.pf_specFp:
+    args.json_path=os.path.abspath("config/spec06Fp_coverage0.3_test.json")
     
   if args.dir is not None:
     TASKS_DIR = args.dir
