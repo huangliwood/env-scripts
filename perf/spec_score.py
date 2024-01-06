@@ -102,7 +102,7 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
   data = []
   if enPrint:
     print("==================== Score ===================")
-  data.append(["Score","",""])
+  # data.append(["Score","",""])
   total_count = 0
   total_score = 1
   spec_score = dict()
@@ -115,13 +115,13 @@ def get_spec_score(args,spec_time, spec_version, frequency,enPrint=True):
     total_score *= score
     if enPrint:
       print(f"{spec_name:>15}: {score:6.3f}, {score / frequency:6.3f}")
-    data.append([spec_name, f"{score:6.3f}", f"{score / frequency:6.3f}"])
+    # data.append([spec_name, f"{score:6.3f}", f"{score / frequency:6.3f}"])
     spec_score[spec_name] = score
   geomean_score = total_score ** (1 / total_count)
   if enPrint:
     print(f"SPEC{spec_version}@{frequency}GHz: {geomean_score:6.3f}")
     print(f"SPEC{spec_version}/GHz:  {geomean_score / frequency:6.3f}")
-  data.append([f"SPEC{spec_version}@GHz", f"{geomean_score:6.3f}",f"{geomean_score / frequency:6.3f}"])
+  # data.append([f"SPEC{spec_version}@GHz", f"{geomean_score:6.3f}",f"{geomean_score / frequency:6.3f}"])
   if enPrint:
     print()
     print(f"********* SPECINT {spec_version} *********")

@@ -17,10 +17,12 @@ from server import Server
 from gcpt_run_time_eval import *
 import AutoEmailAlert
 
-tasks_dir = "SPEC06_EmuTasks_10_22_2021"
+TASKS_DIR = "SPEC06_EmuTasks_10_22_2021"
 perf_base_path = ""
-def get_perf_base_path(xs_path):
-  return os.path.join(xs_path, tasks_dir)
+def get_perf_base_path():
+  if os.path.isabs(TASKS_DIR):
+    return TASKS_DIR
+  return os.path.join(os.path.dirname("."), TASKS_DIR)
 
 def load_all_gcpt(gcpt_path, json_path, server_num, threads, state_filter=None, xs_path=None, sorted_by=None):
   perf_filter = [
@@ -32,7 +34,7 @@ def load_all_gcpt(gcpt_path, json_path, server_num, threads, state_filter=None, 
   with open(json_path) as f:
     data = json.load(f)
   hour_list=[]
-  perf_base_path = get_perf_base_path(xs_path)
+  perf_base_path = get_perf_base_path()
   for benchspec in data:
     #if "gcc" not in benchspec:# or "hmmer" in benchspec:
     #  continue
@@ -83,13 +85,13 @@ def get_server(server_list):
     l.append(Server(s))
   return l
 
-def xs_run(server_list, workloads, xs_path, warmup, max_instr, threads):
-  emu_path = os.path.join(xs_path, "build/emu")
+def xs_run(server_list, workloads, xs_path, emu_path, warmup, max_instr, threads):
   nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-nemu-interpreter-so")
   # nemu_so_path = os.path.join(xs_path, "ready-to-run/riscv64-spike-so")
-  base_arguments = [emu_path, '--diff', nemu_so_path, '--enable-fork', '-W', str(warmup), '-I', str(max_instr), '-i']
+  base_arguments = [emu_path, '--diff', nemu_so_path, '-W', str(warmup), '-I', str(max_instr), '-i']
   # base_arguments = [emu_path, '--diff', nemu_so_path, '-W', str(warmup), '-I', str(max_instr), '-i']
   # base_arguments = [emu_path, '-W', str(warmup), '-I', str(max_instr), '-i']
+  print(server_list)
   servers = get_server(server_list)
   def server_all_free():
     for s in servers:
@@ -302,31 +304,40 @@ if __name__ == "__main__":
   # --debug for error tests
   # --report for spec scores
   parser = argparse.ArgumentParser(description="autorun script for xs")
-  parser.add_argument('gcpt_path', metavar='gcpt_path', type=str,
-                      help='path to gcpt checkpoints')
-  parser.add_argument('json_path', metavar='json_path', type=str,
-                      help='path to gcpt json')
+  parser.add_argument('--gcpt_path', metavar='gcpt_path', type=str,
+                      help='path to gcpt checkpoints',default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt")
+  parser.add_argument('--json_path', metavar='json_path', type=str,
+                      help='path to gcpt json',
+                      default="/nfs/home/qiminhao/code/env-scripts/config/spec06Int_coverage0.3_test.json")
+                      # default="/nfs/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_coverage0.3_test.json")
   parser.add_argument('--xs', help='path to xs')
+  parser.add_argument('--emu', help='path to emu',default=f"./build/emu")
   parser.add_argument('--ref', default=None, type=str, help='path to ref')
   parser.add_argument('--warmup', '-W', default=20000000, type=int, help="warmup instr count")
   parser.add_argument('--max-instr', '-I', default=40000000, type=int, help="max instr count")
-  parser.add_argument('--threads', '-T', default=1, type=int, help="number of emu threads")
-  parser.add_argument('--server-list', '-L', type=str, help="server list, like \"172.28.9.104 172.28.9.107\", support alias")
+  parser.add_argument('--threads', '-T', default=16, type=int, help="number of emu threads")
+  parser.add_argument('--server-list', '-L', type=str,
+                      # default="big-3 big-4 big-5 big-6 big-7 big-8 big-9 big-20 big-21",
+                      default="big-20 big-21 big-22 big-23 big-24 big-25 big-26 big-27 big-28"
+                      ,help="server list, like \"big-21.104 172.28.9.107\", support alias")
+  parser.add_argument("--server-low",action='store_true', default=False, 
+                      help='serverList1:big-3 big-4 big-5 big-6 big-7 big-8 big-9')
   parser.add_argument('--report', '-R', action='store_true', default=False, help='report only')
   parser.add_argument('--show', '-S', action='store_true', default=False, help='show list of gcpt only')
   parser.add_argument('--debug', '-D', action='store_true', default=False, help='debug options')
   parser.add_argument('--version', default=2006, type=int, help='SPEC version')
   parser.add_argument('--isa', default="rv64gcb", type=str, help='ISA version')
   parser.add_argument('--dir', default=None, type=str, help='SPECTasks dir')
-  parser.add_argument('--jobs', '-j', default=1, type=int, help="processing files in 'j' threads")
+  parser.add_argument('--jobs', '-j', default=8, type=int, help="processing files in 'j' threads")
   parser.add_argument('--resume', action='store_true', default=False, help="continue to exe, ignore the aborted and success tests")
 
   args = parser.parse_args()
 
   if args.dir is not None:
-    tasks_dir = args.dir
-  perf_base_path = get_perf_base_path(args.xs)
-
+    TASKS_DIR = args.dir
+  perf_base_path = get_perf_base_path()
+  if args.server_low:
+    args.server_list = "big-3 big-4 big-5 big-6 big-7 big-8 big-9"
   if args.xs is None:
     print("need --xs")
     sys.exit()
@@ -392,6 +403,6 @@ if __name__ == "__main__":
     print("All:  ", len(gcpt))
     print("First:", gcpt[0])
     print("Last: ", gcpt[-1])
-    xs_run(args.server_list, gcpt, args.xs, args.warmup, args.max_instr, args.threads)
+    xs_run(args.server_list, gcpt, args.xs, args.emu, args.warmup, args.max_instr, args.threads)
 
     # AutoEmailAlert.inform(0, f"{args.xs}执行完毕", "maxpicca@qq.com")

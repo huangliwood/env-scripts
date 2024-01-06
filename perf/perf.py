@@ -308,7 +308,7 @@ def find_all_in_dir(dir_path):
             print("find non-file " + sub_path)
     return all_files
 
-cur_path="/nfs/home/qiminhao/code/wenshanhu"
+cur_path="/nfs/home/qiminhao/code/env-scripts"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='performance counter log parser')
     parser.add_argument('--pfile', '-f', type=str, default=None,
@@ -320,7 +320,7 @@ if __name__ == "__main__":
     parser.add_argument('--recursive', '-r', action='store_true', default=False,
         help="recursively find simulator_err.txt")
     parser.add_argument('--dir', '-d', default = None, help="directory")
-    parser.add_argument('--spec_json', '-S', default = f"{cur_path}/config/simpoint_coverage0.3_test.json", help="spec test json")
+    parser.add_argument('--spec_json', '-S', default = f"{cur_path}/config/spec06Int_coverage0.3_test.json", help="spec test json")
     parser.add_argument('--spec',action='store_true',default=False)
     parser.add_argument('--verbose', '-v', action='store_true', default=False,
         help="show processing logs")
